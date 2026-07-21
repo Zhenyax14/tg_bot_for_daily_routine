@@ -5,7 +5,7 @@ from domain.value_objects.daily_time import DailyTime
 
 _MESSAGES: tuple[tuple[str, str, str], ...] = (
     ("morning-greeting", "07:00", "От имени моего создателя желаю вам доброго утро, друзья"),
-    ("game-chance", "07:15", "Шанс игры @Duhastikx"),
+    ("game-chance", "07:15", "Шанс игры @Duhastikx @SamVimesHimself @Niktia_Bordin"),
     ("good-night", "22:00", "Спокойной ночи, друзья"),
 )
 
