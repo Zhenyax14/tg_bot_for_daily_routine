@@ -61,8 +61,7 @@ async def main():
         schedule.every().day.at("07:00").do(lambda: asyncio.create_task(notify("От имени моего создателя желаю вам доброго утро, друзья")))
         schedule.every().day.at("07:15").do(lambda: asyncio.create_task(notify("Шанс игры @Duhastikx")))
         schedule.every().day.at("22:00").do(lambda: asyncio.create_task(notify("Спокойной ночи, друзья")))
-        schedule.every(1800).seconds.do(lambda: asyncio.create_task(notify('@sql_excel Выпейте 100мл воды 💧')))
-        schedule.every(2).hours.do(lambda: asyncio.create_task(notify('@Nikitaslav_Dobrosmysl @sql_excel 10 отжиманий 💪🏼')))
+
 
     # Schedule notifications
     schedule_notifications()
