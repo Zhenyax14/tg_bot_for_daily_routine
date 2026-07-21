@@ -1,11 +1,15 @@
-version: '3.8'
-
 services:
   bot:
-    build: ..
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: my-telegram-bot:latest
     container_name: my-telegram-bot
     restart: unless-stopped
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - CHAT_ID=${CHAT_ID}
-      - THREAD_ID=${THREAD_ID}
+    env_file:
+      - ../.env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
