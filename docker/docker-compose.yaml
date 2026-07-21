@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   bot:
-    build: .
+    build: ..
     container_name: my-telegram-bot
     restart: unless-stopped
     environment:
