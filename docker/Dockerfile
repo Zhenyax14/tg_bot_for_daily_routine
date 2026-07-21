@@ -1,19 +1,25 @@
-# Use the official Python image from the Docker Hub
 FROM python:3.11-slim
 
-# Set the working directory in the container
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Europe/Madrid
+
+# Zona horaria: slim no trae la base de datos de timezones
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy the requirements file into the container
-COPY requirements.txt .
-
-# Install the Python dependencies
+# Deps primero: cachea la capa mientras no cambie requirements
+COPY docker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code into the container
-COPY .. .
+# Usuario no root
+RUN useradd -m -u 1000 bot
+COPY --chown=bot:bot app/ ./
+USER bot
 
-
-
-# Define the command to run your application
 CMD ["python", "appAsync1.1.py"]
