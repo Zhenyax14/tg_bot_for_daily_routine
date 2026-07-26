@@ -3,20 +3,31 @@ import logging
 from telegram.ext import Application, CommandHandler
 
 from application.ports.notifier import Notifier
+from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
+from application.use_cases.get_todays_holidays import GetTodaysHolidays
+from application.use_cases.get_upcoming_holidays import GetUpcomingHolidays
 from application.use_cases.get_world_times import GetWorldTimes
 from application.use_cases.schedule_daily_messages import ScheduleDailyMessages
 from application.use_cases.send_message import SendMessage
 from config.errors import ConfigError
 from config.settings import Settings
+from domain.value_objects.daily_time import DailyTime
 from infrastructure.config.cities import WORLD_CLOCK_CITIES
+from infrastructure.holidays.nager_date import NagerDateHolidayProvider
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
 from infrastructure.persistence.static_message_repository import StaticMessageRepository
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
+from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
+from infrastructure.telegram.holiday_formatting import format_holiday_greeting
 from infrastructure.time.system_clock import SystemClock
 
 logger = logging.getLogger("bot")
+
+# Se felicita un minuto despues del mensaje matutino ("morning-greeting", 07:00),
+# para que caiga justo detras de el. Si cambias la hora del "buenos dias", ajusta esta.
+HOLIDAY_GREETING_AT = DailyTime(7,1)
 
 
 def build_notifier(settings: Settings) -> Notifier:
@@ -30,12 +41,30 @@ def build_application(settings: Settings) -> Application:
     notifier = build_notifier(settings)
     scheduler = APSchedulerAdapter(settings.timezone)
     repository = StaticMessageRepository()
+    clock = SystemClock()
+    holiday_provider = NagerDateHolidayProvider()
 
     send_message = SendMessage(notifier)
+
+    # Mensajes diarios estaticos (comportamiento existente)
     ScheduleDailyMessages(repository, scheduler, send_message).execute()
 
-    clock = SystemClock()
+    # Felicitacion de festivos: justo despues del "buenos dias"
+    announce_holidays = AnnounceTodaysHolidays(
+        GetTodaysHolidays(holiday_provider, clock),
+        send_message,
+        format_holiday_greeting,
+    )
+    scheduler.schedule_daily(
+        job_id="holidays-greeting",
+        at=HOLIDAY_GREETING_AT,
+        job=announce_holidays.execute,
+    )
+    logger.info("Programado holidays-greeting a las %s", HOLIDAY_GREETING_AT)
+
+    # Comandos
     time_cmd = TimeCommand(GetWorldTimes(clock, WORLD_CLOCK_CITIES))
+    holidays_cmd = HolidaysCommand(GetUpcomingHolidays(holiday_provider, clock))
 
     async def _post_init(app: Application) -> None:
         await send_message.execute(settings.startup_message)
@@ -54,6 +83,7 @@ def build_application(settings: Settings) -> Application:
         .build()
     )
     application.add_handler(CommandHandler("time", time_cmd))
+    application.add_handler(CommandHandler("holidays", holidays_cmd))
     return application
 
 
