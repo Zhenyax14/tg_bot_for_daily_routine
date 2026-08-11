@@ -31,6 +31,7 @@ class Settings:
     web_port: int
     admin_user: str
     admin_password: str
+    admin_role: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -54,9 +55,7 @@ class Settings:
 
         # DATABASE_URL se construye aqui, NUNCA se duplica en .env: asi la
         # contrasena vive en un unico sitio (POSTGRES_PASSWORD) y no puede
-        # desincronizarse entre dos variables escritas a mano. La contrasena
-        # se url-encode para que caracteres especiales (@ : / % #) no rompan
-        # el DSN.
+        # desincronizarse entre dos variables escritas a mano.
         pg_user = os.environ["POSTGRES_USER"].strip()
         pg_password = os.environ["POSTGRES_PASSWORD"]
         pg_db = os.environ["POSTGRES_DB"].strip()
@@ -80,4 +79,5 @@ class Settings:
             web_port=int(raw_port),
             admin_user=os.getenv("ADMIN_USER", "admin").strip(),
             admin_password=os.environ["ADMIN_PASSWORD"],
+            admin_role=os.getenv("ADMIN_ROLE", "admin").strip(),
         )
