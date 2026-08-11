@@ -18,6 +18,7 @@ from infrastructure.config.cities import WORLD_CLOCK_CITIES
 from infrastructure.holidays.country_routing import CountryRoutingHolidayProvider
 from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
+from infrastructure.location.festivos_io_municipality_directory import FestivosIoMunicipalityDirectory
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
 from infrastructure.persistence.database import Database
@@ -75,7 +76,11 @@ def build_application(settings: Settings) -> Application:
     time_cmd = TimeCommand(GetWorldTimes(clock, WORLD_CLOCK_CITIES))
     holidays_cmd = HolidaysCommand(GetUpcomingHolidays(holiday_provider, clock))
 
-    admin_app = build_admin_app(location, settings.admin_user, settings.admin_password)
+    # Panel de administracion: busqueda de municipio por nombre (festivos.io)
+    municipality_directory = FestivosIoMunicipalityDirectory()
+    admin_app = build_admin_app(
+        location, municipality_directory, settings.admin_user, settings.admin_password
+    )
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 
     async def _post_init(app: Application) -> None:
