@@ -1,11 +1,17 @@
-"""Panel de administracion (aiohttp) con login real (usuario + contrasena) y
-sesion por cookie, respaldado en la tabla `users` (contrasenas con bcrypt).
-Solo usuarios con role == "admin" pueden entrar. Dentro, el usuario busca su
-municipio por NOMBRE (no necesita saber que existe un codigo INE).
+"""Panel de administracion (aiohttp).
 
-Las vistas viven como ficheros .html en resources/views/ (Jinja2), y el CSS/JS
-personalizable en resources/static/. Este modulo solo orquesta: construye el
-contexto de cada pagina y delega el renderizado en ViewRenderer.
+Rutas publicas:
+    /                         -> landing (estetica BRAINBIZZ)
+    /login                    -> formulario de acceso
+    /static/...               -> css/js/imagenes
+Rutas protegidas (sesion con role=admin):
+    /admin                    -> dashboard (inicio del panel)
+    /admin/location           -> configure the town/city
+    /admin/location/confirm   -> confirm town when the search is ambiguous
+
+Vistas en resources/views/ (Jinja2), assets en resources/static/. Este modulo
+solo orquesta: arma el contexto y delega el render en ViewRenderer.
+Presentacion pura, sin logica de dominio.
 """
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ from aiohttp import web
 from application.ports.municipality_directory import MunicipalityDirectory
 from application.services.location_service import LocationService
 from application.services.user_service import UserService
+from application.services.uptime_service import UptimeService
 from domain.value_objects.municipality import Municipality
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
@@ -24,7 +31,7 @@ _MAX_RESULTS_SHOWN = 20
 _SESSION_COOKIE = "session"
 _SESSION_MAX_AGE = 8 * 60 * 60  # 8 horas
 _ADMIN_ROLE = "admin"
-_PUBLIC_PATHS = {"/login", "/logout", "/health"}
+_PUBLIC_PATHS = {"/", "/login", "/logout", "/health"}
 
 # app/infrastructure/web/admin_server.py -> parents[2] = app/
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "resources" / "static"
@@ -33,11 +40,28 @@ _STATIC_DIR = Path(__file__).resolve().parents[2] / "resources" / "static"
 def _location_context(location: LocationService, message: str = "", message_class: str = "") -> dict:
     m = location.current
     return {
+        "active": "location",
         "message": message,
         "message_class": message_class,
         "current_ine": m.ine,
         "current_name": m.name,
     }
+
+
+def _user_context(request: web.Request) -> dict:
+    user = request.get("user")
+    if user is None:
+        return {}
+    return {
+        "user_name": user.name,
+        "user_initial": user.name[:1].upper(),
+        "avatar": user.avatar,
+    }
+
+
+def _is_authenticated(request: web.Request, sessions: SessionStore) -> bool:
+    token = request.cookies.get(_SESSION_COOKIE)
+    return bool(token and sessions.username_for(token))
 
 
 def _auth_middleware(user_service: UserService, sessions: SessionStore):
@@ -63,6 +87,7 @@ def build_admin_app(
     location: LocationService,
     municipality_directory: MunicipalityDirectory,
     user_service: UserService,
+    uptime_service: UptimeService,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
@@ -72,12 +97,14 @@ def build_admin_app(
     def html_response(template: str, **context) -> web.Response:
         return web.Response(text=renderer.render(template, **context), content_type="text/html")
 
+    # ---------------- publico ----------------
+    async def landing(request: web.Request) -> web.Response:
+        return html_response("landing.html", authenticated=_is_authenticated(request, sessions))
+
     async def login_get(request: web.Request) -> web.Response:
-        token = request.cookies.get(_SESSION_COOKIE)
-        username = sessions.username_for(token) if token else None
-        if username is not None:
-            raise web.HTTPFound("/")
-        return html_response("login.html")
+        if _is_authenticated(request, sessions):
+            raise web.HTTPFound("/admin")
+        return html_response("login.html", authenticated=False)
 
     async def login_post(request: web.Request) -> web.Response:
         data = await request.post()
@@ -86,12 +113,14 @@ def build_admin_app(
 
         user = await user_service.authenticate(name, password)
         if user is None:
-            return html_response("login.html", error="Usuario o contraseña incorrectos.")
+            return html_response("login.html", authenticated=False,
+                                 error="Usuario o contraseña incorrectos.")
         if user.role.value != _ADMIN_ROLE:
-            return html_response("login.html", error="Este usuario no tiene permiso de administrador.")
+            return html_response("login.html", authenticated=False,
+                                 error="Este usuario no tiene permiso de administrador.")
 
         token = sessions.create(user.name)
-        response = web.HTTPFound("/")
+        response = web.HTTPFound("/admin")
         response.set_cookie(_SESSION_COOKIE, token, max_age=_SESSION_MAX_AGE, httponly=True, samesite="Lax")
         raise response
 
@@ -99,68 +128,71 @@ def build_admin_app(
         token = request.cookies.get(_SESSION_COOKIE)
         if token:
             sessions.destroy(token)
-        response = web.HTTPFound("/login")
+        response = web.HTTPFound("/")
         response.del_cookie(_SESSION_COOKIE)
         raise response
 
-    async def index(request: web.Request) -> web.Response:
-        return html_response("location.html", **_location_context(location))
+    # ---------------- admin: dashboard ----------------
+    async def dashboard(request: web.Request) -> web.Response:
+        m = location.current
+        return html_response(
+            "admin/dashboard.html",
+            active="dashboard",
+            current_ine=m.ine,
+            current_name=m.name,
+            uptime=uptime_service.uptime_human(),
+            **_user_context(request),
+        )
 
-    async def set_location(request: web.Request) -> web.Response:
+    # ---------------- admin: location ----------------
+    async def location_get(request: web.Request) -> web.Response:
+        return html_response("admin/location.html", **_location_context(location), **_user_context(request))
+
+    async def location_post(request: web.Request) -> web.Response:
         data = await request.post()
         query = str(data.get("nombre", "")).strip()
         if len(query) < 2:
-            return html_response(
-                "location.html", **_location_context(location, "Escribe al menos 2 letras.", "err")
-            )
+            return html_response("admin/location.html",
+                                 **_location_context(location, "Escribe al menos 2 letras.", "err"), **_user_context(request))
 
         results = await municipality_directory.search(query)
         if not results:
-            return html_response(
-                "location.html",
-                **_location_context(location, f'No se encontró ningún municipio llamado "{query}".', "err"),
-            )
+            return html_response("admin/location.html",
+                                 **_location_context(location, f'No se encontró ningún municipio llamado "{query}".', "err"), **_user_context(request))
         if len(results) == 1:
             await location.change(results[0].municipality)
             name = results[0].municipality.name
-            return html_response(
-                "location.html", **_location_context(location, f"Guardado: {name}.", "ok")
-            )
+            return html_response("admin/location.html",
+                                 **_location_context(location, f"Guardado: {name}.", "ok"), **_user_context(request))
         if len(results) > _MAX_RESULTS_SHOWN:
-            return html_response(
-                "location.html",
-                **_location_context(
-                    location,
-                    f'Demasiados resultados ({len(results)}) para "{query}". Escribe un nombre más específico.',
-                    "err",
-                ),
-            )
-        return html_response("candidates.html", query=query, results=results)
+            return html_response("admin/location.html",
+                                 **_location_context(location, f'Demasiados resultados ({len(results)}) para "{query}". Escribe un nombre más específico.', "err"), **_user_context(request))
+        return html_response("admin/candidates.html", active="location", query=query, results=results, **_user_context(request))
 
-    async def confirm_location(request: web.Request) -> web.Response:
+    async def location_confirm(request: web.Request) -> web.Response:
         data = await request.post()
         ine = str(data.get("ine", "")).strip()
         name = str(data.get("name", "")).strip() or None
         try:
             municipality = Municipality(ine=ine, name=name)
         except ValueError:
-            return html_response(
-                "location.html", **_location_context(location, "Selección inválida.", "err")
-            )
+            return html_response("admin/location.html",
+                                 **_location_context(location, "Selección inválida.", "err"), **_user_context(request))
         await location.change(municipality)
-        return html_response(
-            "location.html", **_location_context(location, f"Guardado: {name or ine}.", "ok")
-        )
+        return html_response("admin/location.html",
+                             **_location_context(location, f"Guardado: {name or ine}.", "ok"), **_user_context(request))
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
+    app.router.add_get("/", landing)
     app.router.add_get("/login", login_get)
     app.router.add_post("/login", login_post)
     app.router.add_post("/logout", logout_post)
-    app.router.add_get("/", index)
-    app.router.add_post("/location", set_location)
-    app.router.add_post("/location/confirm", confirm_location)
+    app.router.add_get("/admin", dashboard)
+    app.router.add_get("/admin/location", location_get)
+    app.router.add_post("/admin/location", location_post)
+    app.router.add_post("/admin/location/confirm", location_confirm)
     app.router.add_get("/health", health)
     app.router.add_static("/static/", _STATIC_DIR)
     return app
