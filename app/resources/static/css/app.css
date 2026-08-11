@@ -1,0 +1,14 @@
+body{font-family:system-ui,-apple-system,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a}
+header h1{font-size:1.3rem;margin:0}
+label{display:block;margin:1rem 0 .3rem}
+input{font-size:1rem;padding:.45rem;width:14rem}
+button{font-size:1rem;padding:.45rem 1rem;margin-top:1rem;cursor:pointer}
+.msg{padding:.5rem .75rem;border-radius:.4rem;margin:1rem 0}
+.msg.ok{background:#e6f4ea}
+.msg.err{background:#fce8e6}
+.cur{color:#666;margin-top:1.5rem}
+.candidates{list-style:none;padding:0}
+.candidates li{margin:.4rem 0}
+.candidates button{width:100%;text-align:left;background:#f4f4f4;border:1px solid #ddd}
+.logout button{background:none;border:none;color:#666;text-decoration:underline;cursor:pointer;padding:0;margin-top:1.5rem;font-size:.9rem}
+footer{margin-top:3rem;color:#999;font-size:.8rem;border-top:1px solid #eee;padding-top:1rem}
