@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+{% block content %}
+<p>Varios municipios coinciden con "{{ query }}". ¿Cuál es el tuyo?</p>
+<ul class="candidates">
+  {% for r in results %}
+  <li>
+    <form method="post" action="/location/confirm">
+      <input type="hidden" name="ine" value="{{ r.municipality.ine }}">
+      <input type="hidden" name="name" value="{{ r.municipality.name or '' }}">
+      <button type="submit">{{ r.municipality.name or r.municipality.ine }} ({{ r.province }})</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}
