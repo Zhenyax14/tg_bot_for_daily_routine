@@ -1,9 +1,5 @@
-"""Conexion a PostgreSQL (asyncpg): pool + creacion idempotente del esquema.
-
-El esquema se aplica al arrancar con CREATE TABLE IF NOT EXISTS, asi cualquier
-BBDD limpia queda lista sin pasos manuales. Las tablas de usuarios/roles se
-anadiran en la siguiente slice.
-"""
+"""Conexion a PostgreSQL (asyncpg): pool + creacion/actualizacion idempotente
+del esquema."""
 from __future__ import annotations
 
 import asyncpg
@@ -12,6 +8,15 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS location (
     id  boolean PRIMARY KEY DEFAULT true CHECK (id),
     ine text NOT NULL
+);
+ALTER TABLE location ADD COLUMN IF NOT EXISTS nombre text;
+
+CREATE TABLE IF NOT EXISTS users (
+    id            serial PRIMARY KEY,
+    name          text NOT NULL UNIQUE,
+    password_hash text NOT NULL,
+    role          text NOT NULL,
+    avatar        text
 );
 """
 

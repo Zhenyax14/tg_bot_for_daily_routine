@@ -79,5 +79,5 @@ class Settings:
             web_host=os.getenv("WEB_HOST", "0.0.0.0").strip(),
             web_port=int(raw_port),
             admin_user=os.getenv("ADMIN_USER", "admin").strip(),
-            admin_password=os.environ["ADMIN_PASSWORD"],
+            admin_password=os.environ["ADMIN_PASSWORD"]
         )

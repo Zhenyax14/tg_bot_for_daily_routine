@@ -4,7 +4,9 @@ from telegram.ext import Application, CommandHandler
 
 from application.ports.notifier import Notifier
 from application.services.location_service import LocationService
+from application.services.user_service import UserService
 from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
+from application.use_cases.bootstrap_admin_user import BootstrapAdminUser
 from application.use_cases.get_todays_holidays import GetTodaysHolidays
 from application.use_cases.get_upcoming_holidays import GetUpcomingHolidays
 from application.use_cases.get_world_times import GetWorldTimes
@@ -23,8 +25,10 @@ from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
 from infrastructure.persistence.database import Database
 from infrastructure.persistence.postgres_location_repository import PostgresLocationRepository
+from infrastructure.persistence.postgres_user_repository import PostgresUserRepository
 from infrastructure.persistence.static_message_repository import StaticMessageRepository
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
+from infrastructure.security.bcrypt_password_hasher import BcryptPasswordHasher
 from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
 from infrastructure.telegram.holiday_formatting import format_holiday_greeting
@@ -51,10 +55,15 @@ def build_application(settings: Settings) -> Application:
 
     # PostgreSQL: el pool se conecta en post_init (dentro del loop)
     database = Database(settings.database_url)
+
     location = LocationService(
         PostgresLocationRepository(database),
         default=Municipality(settings.spain_municipio),
     )
+
+    user_repository = PostgresUserRepository(database)
+    user_service = UserService(user_repository, BcryptPasswordHasher())
+    bootstrap_admin = BootstrapAdminUser(user_repository, user_service)
 
     holiday_provider = CountryRoutingHolidayProvider(
         {
@@ -76,17 +85,21 @@ def build_application(settings: Settings) -> Application:
     time_cmd = TimeCommand(GetWorldTimes(clock, WORLD_CLOCK_CITIES))
     holidays_cmd = HolidaysCommand(GetUpcomingHolidays(holiday_provider, clock))
 
-    # Panel de administracion: busqueda de municipio por nombre (festivos.io)
+    # Panel de administracion: login real (usuario+contrasena) contra la
+    # tabla users, sesion por cookie, busqueda de municipio por nombre.
     municipality_directory = FestivosIoMunicipalityDirectory()
-    admin_app = build_admin_app(
-        location, municipality_directory, settings.admin_user, settings.admin_password
-    )
+    admin_app = build_admin_app(location, municipality_directory, user_service)
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 
     async def _post_init(app: Application) -> None:
         await database.connect()
         await database.init_schema()
         await location.load()
+        # ADMIN_USER/ADMIN_PASSWORD siembran el PRIMER usuario admin (solo si
+        # la tabla users esta vacia); no vuelven a tocarla despues.
+        await bootstrap_admin.execute(
+            settings.admin_user, settings.admin_password, settings.admin_role
+        )
         await send_message.execute(settings.startup_message)
         scheduler.start()
         await admin_server.start()
