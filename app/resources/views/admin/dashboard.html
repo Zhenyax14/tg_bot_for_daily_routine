@@ -1,0 +1,22 @@
+{% extends "admin/layout.html" %}
+{% block title %}Inicio · Panel Bot{% endblock %}
+{% block heading %}Inicio{% endblock %}
+{% block content %}
+<div class="dash-grid">
+  <div class="dash-card">
+    <div class="k">Localidad activa</div>
+    <div class="v small">{% if current_name %}{{ current_name }}{% else %}INE {{ current_ine }}{% endif %}</div>
+    <div class="hint">Festivos de España según este municipio</div>
+  </div>
+  <div class="dash-card">
+    <div class="k">Estado</div>
+    <div class="v small status-ok">En marcha<span class="dot"></span></div>
+    <div class="hint">El bot responde y envía sus mensajes diarios</div>
+  </div>
+  <div class="dash-card">
+    <div class="k">Tiempo activo</div>
+    <div class="v small">{{ uptime }}</div>
+    <div class="hint">Desde el último arranque del bot</div>
+  </div>
+</div>
+{% endblock %}

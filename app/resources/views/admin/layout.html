@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Panel · Bot{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <div class="admin-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/">
+        <span class="mark"><span></span><span></span></span>
+        <span class="wordmark">Bot</span>
+      </a>
+      <nav>
+        <a href="/admin" class="{% if active == 'dashboard' %}active{% endif %}">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" stroke-width="2"/><rect x="14" y="3" width="7" height="7" stroke-width="2"/><rect x="3" y="14" width="7" height="7" stroke-width="2"/><rect x="14" y="14" width="7" height="7" stroke-width="2"/></svg>
+          <span>Inicio</span>
+        </a>
+        <a href="/admin/location" class="{% if active == 'location' %}active{% endif %}">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-5.2-7-11a7 7 0 0114 0c0 5.8-7 11-7 11z" stroke-width="2"/><circle cx="12" cy="10" r="2.5" stroke-width="2"/></svg>
+          <span>Ubicación</span>
+        </a>
+      </nav>
+      <div class="user-box">
+        <div class="avatar">
+          {% if avatar %}<img src="{{ avatar }}" alt="">{% else %}{{ user_initial }}{% endif %}
+        </div>
+        <div class="user-meta">
+          <span class="hi">Bienvenido,</span>
+          <strong class="uname">{{ user_name }}</strong>
+        </div>
+        <form method="post" action="/logout" class="signout" title="Cerrar sesión">
+          <button type="submit" aria-label="Cerrar sesión">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M16 17l5-5-5-5M21 12H9M12 19H5a2 2 0 01-2-2V7a2 2 0 012-2h7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <div class="admin-topbar">
+        <h1>{% block heading %}Panel{% endblock %}</h1>
+        <span class="who">Panel interno</span>
+      </div>
+      <div class="admin-content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

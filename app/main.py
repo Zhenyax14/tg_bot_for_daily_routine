@@ -1,9 +1,11 @@
 import logging
+import time
 
 from telegram.ext import Application, CommandHandler
 
 from application.ports.notifier import Notifier
 from application.services.location_service import LocationService
+from application.services.uptime_service import UptimeService
 from application.services.user_service import UserService
 from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
 from application.use_cases.bootstrap_admin_user import BootstrapAdminUser
@@ -61,6 +63,8 @@ def build_application(settings: Settings) -> Application:
         default=Municipality(settings.spain_municipio),
     )
 
+    uptime_service = UptimeService(time.monotonic)
+
     user_repository = PostgresUserRepository(database)
     user_service = UserService(user_repository, BcryptPasswordHasher())
     bootstrap_admin = BootstrapAdminUser(user_repository, user_service)
@@ -88,7 +92,7 @@ def build_application(settings: Settings) -> Application:
     # Panel de administracion: login real (usuario+contrasena) contra la
     # tabla users, sesion por cookie, busqueda de municipio por nombre.
     municipality_directory = FestivosIoMunicipalityDirectory()
-    admin_app = build_admin_app(location, municipality_directory, user_service)
+    admin_app = build_admin_app(location, municipality_directory, user_service, uptime_service)
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 
     async def _post_init(app: Application) -> None:
@@ -101,6 +105,7 @@ def build_application(settings: Settings) -> Application:
             settings.admin_user, settings.admin_password, settings.admin_role
         )
         await send_message.execute(settings.startup_message)
+        uptime_service.mark_started()
         scheduler.start()
         await admin_server.start()
         logger.info(
