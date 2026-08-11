@@ -3,6 +3,7 @@ import logging
 from telegram.ext import Application, CommandHandler
 
 from application.ports.notifier import Notifier
+from application.services.location_service import LocationService
 from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
 from application.use_cases.get_todays_holidays import GetTodaysHolidays
 from application.use_cases.get_upcoming_holidays import GetUpcomingHolidays
@@ -12,22 +13,26 @@ from application.use_cases.send_message import SendMessage
 from config.errors import ConfigError
 from config.settings import Settings
 from domain.value_objects.daily_time import DailyTime
+from domain.value_objects.municipality import Municipality
 from infrastructure.config.cities import WORLD_CLOCK_CITIES
+from infrastructure.holidays.country_routing import CountryRoutingHolidayProvider
+from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
+from infrastructure.persistence.database import Database
+from infrastructure.persistence.postgres_location_repository import PostgresLocationRepository
 from infrastructure.persistence.static_message_repository import StaticMessageRepository
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
 from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
 from infrastructure.telegram.holiday_formatting import format_holiday_greeting
 from infrastructure.time.system_clock import SystemClock
+from infrastructure.web.admin_server import AdminServer, build_admin_app
 
 logger = logging.getLogger("bot")
 
-# Se felicita un minuto despues del mensaje matutino ("morning-greeting", 07:00),
-# para que caiga justo detras de el. Si cambias la hora del "buenos dias", ajusta esta.
-HOLIDAY_GREETING_AT = DailyTime(7,1)
+HOLIDAY_GREETING_AT = DailyTime(7, 1)  # justo tras el "buenos dias" de las 07:00
 
 
 def build_notifier(settings: Settings) -> Notifier:
@@ -42,37 +47,53 @@ def build_application(settings: Settings) -> Application:
     scheduler = APSchedulerAdapter(settings.timezone)
     repository = StaticMessageRepository()
     clock = SystemClock()
-    holiday_provider = NagerDateHolidayProvider()
+
+    # PostgreSQL: el pool se conecta en post_init (dentro del loop)
+    database = Database(settings.database_url)
+    location = LocationService(
+        PostgresLocationRepository(database),
+        default=Municipality(settings.spain_municipio),
+    )
+
+    holiday_provider = CountryRoutingHolidayProvider(
+        {
+            "ES": FestivosIoHolidayProvider(lambda: location.current.ine),
+            "RU": NagerDateHolidayProvider(),
+        }
+    )
 
     send_message = SendMessage(notifier)
-
-    # Mensajes diarios estaticos (comportamiento existente)
     ScheduleDailyMessages(repository, scheduler, send_message).execute()
 
-    # Felicitacion de festivos: justo despues del "buenos dias"
     announce_holidays = AnnounceTodaysHolidays(
-        GetTodaysHolidays(holiday_provider, clock),
-        send_message,
-        format_holiday_greeting,
+        GetTodaysHolidays(holiday_provider, clock), send_message, format_holiday_greeting
     )
     scheduler.schedule_daily(
-        job_id="holidays-greeting",
-        at=HOLIDAY_GREETING_AT,
-        job=announce_holidays.execute,
+        job_id="holidays-greeting", at=HOLIDAY_GREETING_AT, job=announce_holidays.execute
     )
-    logger.info("Programado holidays-greeting a las %s", HOLIDAY_GREETING_AT)
 
-    # Comandos
     time_cmd = TimeCommand(GetWorldTimes(clock, WORLD_CLOCK_CITIES))
     holidays_cmd = HolidaysCommand(GetUpcomingHolidays(holiday_provider, clock))
 
+    admin_app = build_admin_app(location, settings.admin_user, settings.admin_password)
+    admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
+
     async def _post_init(app: Application) -> None:
+        await database.connect()
+        await database.init_schema()
+        await location.load()
         await send_message.execute(settings.startup_message)
         scheduler.start()
-        logger.info("Bot arrancado (%s)", settings.timezone)
+        await admin_server.start()
+        logger.info(
+            "Bot arrancado (%s), panel en http://%s:%s, localidad ES=%s",
+            settings.timezone, settings.web_host, settings.web_port, location.current.ine,
+        )
 
     async def _post_shutdown(app: Application) -> None:
+        await admin_server.stop()
         scheduler.shutdown()
+        await database.close()
         logger.info("Parado limpiamente")
 
     application = (
