@@ -30,7 +30,7 @@ Built with hexagonal architecture (ports and adapters) and tactical DDD patterns
 ## Quick start
 
 ```bash
-git clone https://github.com/Zhenyax14/bot2.git && cd bot2
+git clone https://github.com/Zhenyax14/tg_bot_for_daily_routine.git && cd tg_bot_for_daily_routine
 cp docker/.env.example .env      # then fill in the values
 docker compose -f docker/docker-compose.yaml up -d --build
 docker compose -f docker/docker-compose.yaml logs -f
@@ -69,7 +69,7 @@ The rule that governs the whole design: **dependencies point inward**.
 ### Project layout
 
 ```
-bot2/
+tg_bot_for_daily_routine/
 ├── app/
 │   ├── main.py                                     
 │   ├── config/
@@ -234,7 +234,7 @@ cd docker && docker compose up -d --build
 Suggested alias:
 
 ```bash
-alias dcb='docker compose -f /path/to/bot2/docker/docker-compose.yaml'
+alias dcb='docker compose -f /path/to/tg_bot_for_daily_routine/docker/docker-compose.yaml'
 ```
 
 ### Verification

@@ -22,7 +22,18 @@ que documenta la aplicación; aquí solo está lo que **no se deduce del repo**.
 | Features | `nesting=1,keyctl=1` |
 | Arranque con el nodo | `onboot: 1` |
 | Runtime | Docker CE + docker-compose-plugin |
-| Ruta de la app | `/opt/bot2` |
+| Ruta de la app | `/opt/tg_bot_for_daily_routine` |
+| Puerto panel web (host) | `8081` → `8080` del contenedor `bot` |
+
+---
+
+## 0. Puntos de acceso
+
+| Servicio | URL / comando | Notas |
+|---|---|---|
+| GUI web de Proxmox (el nodo, no el CT) | `https://<IP-DEL-NODO>:8006` | Puerto por defecto de Proxmox VE. Sustituir `<IP-DEL-NODO>` por la IP del host físico (no es la `.204`, esa es del CT). Certificado autofirmado: el navegador avisará. |
+| SSH al CT | `ssh root@192.168.1.204` | Ver paso 3 |
+| Panel de administración del bot | `http://192.168.1.204:8081/login` | Requiere el contenedor `bot` levantado (ver paso 5) y las credenciales `ADMIN_USER`/`ADMIN_PASSWORD` del `.env` |
 
 ---
 
@@ -195,26 +206,46 @@ revisar el paso 2 antes de continuar.
 
 ```bash
 cd /opt
-git clone https://github.com/Zhenyax14/bot2.git
-cd bot2
+git clone https://github.com/Zhenyax14/tg_bot_for_daily_routine.git
+cd tg_bot_for_daily_routine
 
 cp docker/.env.example .env
 nano .env
 chmod 600 .env
 ```
 
-Contenido del `../../.env`:
+Contenido del `../../.env` (ver `docker/.env.example` para la plantilla completa):
 
 ```
+# Telegram
 TELEGRAM_BOT_TOKEN=<token de @BotFather>
 CHAT_ID=-100xxxxxxxxxx
 THREAD_ID=
 STARTUP_MESSAGE=
+
+# PostgreSQL (obligatorio desde la v2.0 — panel web + persistencia)
+POSTGRES_USER=tgbot
+POSTGRES_PASSWORD=<contraseña fuerte>
+POSTGRES_DB=tgbot
+
+# Panel de administración web (obligatorio ADMIN_PASSWORD)
+ADMIN_USER=admin
+ADMIN_PASSWORD=<contraseña para entrar al panel>
+
+# Localidad inicial para festivos (código INE, 5 dígitos); luego se cambia
+# desde /admin/location sin reiniciar
+SPAIN_MUNICIPIO=03031
 ```
 
 > `CHAT_ID` de supergrupo empieza por `-100`.
 > `THREAD_ID` vacío en grupos sin temas.
 > `STARTUP_MESSAGE` vacío: ver la nota del apagado programado (paso 7).
+> `POSTGRES_PASSWORD` y `ADMIN_PASSWORD` son **obligatorias**: sin ellas el
+> contenedor `postgres` no arranca (`Database is uninitialized and superuser
+> password is not specified`) y el `bot` se queda esperando su `healthcheck`
+> para siempre.
+> Al primer arranque se crea el esquema de base de datos y el usuario admin
+> automáticamente — no hace falta ningún paso manual de migración.
 
 ### Arranque en seco
 
@@ -248,10 +279,31 @@ docker compose -f docker/docker-compose.yaml logs -f
 Buscar `Enviado: ...`. Si aparece `Fallo al enviar`, ver la tabla de diagnóstico
 del `README.md` del repo.
 
+Confirmación de que el panel levantó, buscar en el log del `bot`:
+
+```
+INFO bot | Bot arrancado (Europe/Madrid), panel en http://0.0.0.0:8080, localidad ES=03031
+```
+
+### Acceso al panel web
+
+El `docker-compose.yaml` mapea el puerto interno `8080` del contenedor al
+`8081` del CT (`ports: ["8081:8080"]`). Como el CT tiene IP fija en la misma
+LAN (sin NAT), desde cualquier equipo de la red:
+
+```
+http://192.168.1.204:8081/login
+```
+
+Usuario y contraseña son `ADMIN_USER` / `ADMIN_PASSWORD` del `.env` (el
+usuario admin se crea solo, una vez, en el primer arranque). Desde
+`/admin/location` se busca el municipio por nombre y se guarda — el cambio lo
+recoge el proveedor de festivos al vuelo, sin reiniciar el contenedor.
+
 ### Alias
 
 ```bash
-echo "alias dcb='docker compose -f /opt/bot2/docker/docker-compose.yaml'" >> ~/.bashrc
+echo "alias dcb='docker compose -f /opt/tg_bot_for_daily_routine/docker/docker-compose.yaml'" >> ~/.bashrc
 ```
 
 ---
@@ -329,6 +381,11 @@ hasta el `shutdown` de medianoche. No rompe nada.
 | `open sysctl net.ipv4.ip_unprivileged_port_start ... permission denied` | CVE-2025-52881 + AppArmor | Ver paso 2 |
 | `pct: command not found` | Comando lanzado dentro del CT | Ejecutarlo en el nodo |
 | `Could not chdir to home directory /root` | Flip `unprivileged` 1→0→1 desbarató los UIDs | Ver aviso abajo |
+| `postgres` reinicia en bucle: `Database is uninitialized and superuser password is not specified` | Falta `POSTGRES_PASSWORD` en `.env` | Añadirla y `docker compose down -v` (el volumen `pgdata` quedó a medio inicializar) antes de volver a `up` |
+| `bot` no arranca / se queda esperando | `postgres` no está `healthy` (ver causa anterior) — `depends_on: condition: service_healthy` bloquea el arranque | Arreglar `postgres` primero, luego `docker compose up -d` |
+| El bot no responde a `/holidays`, log muestra `GET .../municipio/XXXXX.json 404` | Código INE de la localidad configurada no existe en `festivos.io` | Fijar un municipio real desde `/admin/location` (por nombre, no INE a mano) |
+| Un comando de Telegram no responde y el log dice `No error handlers are registered, logging exception` | Excepción sin capturar en el handler (p. ej. la del punto anterior) | Revisar el traceback del log; no hay feedback al usuario en Telegram por diseño actual |
+| Panel web no responde en `192.168.1.204:8081` aun con `docker compose ps` mostrando `bot` como `Up` | Repo desactualizado a una revisión sin panel (`git branch`/`git log` para confirmar) | `git pull` sobre `master` (el panel se mergeó ahí en "Release 2.0", PR #19) y reconstruir |
 
 ### ⚠ No cambiar `unprivileged` a mano
 
@@ -354,13 +411,22 @@ Todo lo que empiece por `pct` va **siempre** en el nodo.
 
 | Recurso | Asignado | Uso real | Nota |
 |---|---|---|---|
-| RAM | 512 MB | ~200-260 MB | Debian ~40 + dockerd ~120 + Python ~70 |
+| RAM | 512 MB | ~200-260 MB (solo bot) | Debian ~40 + dockerd ~120 + Python ~70 |
 | Swap | 512 MB | — | Convierte un pico de OOM en lentitud |
-| Disco | 5 GB | ~2-2.5 GB | Docker ~400 MB + imagen ~300 MB |
+| Disco | 5 GB | ~2-2.5 GB (solo bot) | Docker ~400 MB + imagen ~300 MB |
 | CPU | 1 core | ~0% en reposo | El bot es I/O, no cómputo |
 
-Llamar a APIs externas (Telegram, LLM) es I/O: unos 1-2 MB por conexión. **No
-justifica más RAM ni más cores.** Ampliar en caliente si hiciera falta:
+> ⚠️ **Desde la v2.0 (panel web + PostgreSQL) estas cifras se quedan cortas.**
+> El contenedor `postgres:17` añade su propio consumo (shared_buffers,
+> procesos auxiliares) por encima de lo anterior. Con 512 MB asignados al CT
+> es fácil entrar en presión de memoria con ambos contenedores corriendo a la
+> vez. Recomendado subir a **1024 MB de RAM** y **8 GB de disco** (el volumen
+> `pgdata` crece con el tiempo) antes de desplegar esta versión, y confirmar
+> con la medición de abajo.
+
+Llamar a APIs externas (Telegram, LLM, festivos.io) es I/O: unos 1-2 MB por
+conexión. Eso no justifica más RAM ni más cores — el ajuste de arriba es por
+Postgres, no por el bot. Ampliar en caliente si hiciera falta:
 
 ```bash
 pct set 101 --memory 1024
@@ -401,7 +467,7 @@ DRY_RUN=1 dcb run --rm -e DRY_RUN bot         # arranque en seco
 Verificar credenciales sin arrancar la app:
 
 ```bash
-set -a; source /opt/bot2/.env; set +a
+set -a; source /opt/tg_bot_for_daily_routine/.env; set +a
 curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" -d text="ping"
 ```
