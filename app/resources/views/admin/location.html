@@ -1,0 +1,23 @@
+{% extends "admin/layout.html" %}
+{% block title %}Ubicación · Panel Bot{% endblock %}
+{% block heading %}Ubicación{% endblock %}
+{% block content %}
+<div class="center-wrap">
+  <div class="form-card">
+    <h2>Configurar municipio</h2>
+    {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
+    <form method="post" action="/admin/location">
+      <label for="nombre">Nombre del municipio (España)</label>
+      <input id="nombre" name="nombre" placeholder="Benidorm" required>
+      <div><button type="submit">Buscar</button></div>
+    </form>
+    <p class="cur">
+      {% if current_name %}
+        Localidad actual: <strong>{{ current_name }}</strong> (INE {{ current_ine }})
+      {% else %}
+        Localidad actual: INE <strong>{{ current_ine }}</strong>
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endblock %}

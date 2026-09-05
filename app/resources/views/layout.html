@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}BRAINBIZZ · Panel del bot{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="mark"><span></span><span></span></span>
+      <span class="wordmark">BRAINBIZZ</span>
+    </a>
+    <nav class="nav">
+      {% block nav %}
+        {% if authenticated %}
+          <a class="ghost" href="/admin">Panel</a>
+          <form method="post" action="/logout" style="display:inline">
+            <button class="cta" style="border:none;cursor:pointer;font-family:inherit">Salir</button>
+          </form>
+        {% else %}
+          <a class="cta" href="/login">Entrar</a>
+        {% endif %}
+      {% endblock %}
+    </nav>
+  </header>
+
+  {% block content %}{% endblock %}
+
+  <footer class="site-footer">
+    <p>BOT · panel interno del bot</p>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

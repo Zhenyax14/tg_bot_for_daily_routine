@@ -1,9 +1,9 @@
-"""Adaptador de HolidayProvider sobre Nager.Date (sin API key; cubre ES y RU).
+"""Adaptador de HolidayProvider sobre Nager.Date (sin API key).
+
+Por defecto filtra a festivos NACIONALES y de tipo "Public" (dia no laborable en
+todo el pais), descartando regionales y observancias.
 
     GET https://date.nager.at/api/v3/PublicHolidays/{year}/{countryCode}
-
-Para un job una vez al dia, se crea un cliente por peticion (sin ciclo de vida
-que gestionar). Se puede inyectar un cliente para tests.
 """
 from __future__ import annotations
 
@@ -17,8 +17,16 @@ _BASE_URL = "https://date.nager.at/api/v3"
 
 
 class NagerDateHolidayProvider:
-    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        *,
+        national_only: bool = True,
+        public_only: bool = True,
+    ) -> None:
         self._client = client
+        self._national_only = national_only
+        self._public_only = public_only
 
     async def holidays(self, country: str, year: int) -> tuple[Holiday, ...]:
         url = f"{_BASE_URL}/PublicHolidays/{year}/{country}"
@@ -31,12 +39,19 @@ class NagerDateHolidayProvider:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 payload = resp.json()
-        return tuple(
-            Holiday(
-                day=date.fromisoformat(item["date"]),
-                name=item["name"],
-                local_name=item.get("localName") or item["name"],
-                country=item["countryCode"],
+
+        result: list[Holiday] = []
+        for item in payload:
+            if self._national_only and item.get("global") is not True:
+                continue
+            if self._public_only and "Public" not in (item.get("types") or []):
+                continue
+            result.append(
+                Holiday(
+                    day=date.fromisoformat(item["date"]),
+                    name=item["name"],
+                    local_name=item.get("localName") or item["name"],
+                    country=item["countryCode"],
+                )
             )
-            for item in payload
-        )
+        return tuple(result)
