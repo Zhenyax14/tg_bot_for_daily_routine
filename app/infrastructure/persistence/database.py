@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS users (
     role          text NOT NULL,
     avatar        text
 );
+
+CREATE TABLE IF NOT EXISTS instrument_disabled (
+    symbol text PRIMARY KEY
+);
 """
 
 

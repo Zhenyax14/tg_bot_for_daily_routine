@@ -22,6 +22,7 @@ class Settings:
     bot_token: str
     chat_id: str
     thread_id: int | None
+    price_alerts_thread_id: int
     timezone: str
     dry_run: bool
     startup_message: str
@@ -42,6 +43,12 @@ class Settings:
         raw_thread = os.getenv("THREAD_ID", "").strip()
         if raw_thread and not raw_thread.lstrip("-").isdigit():
             raise ConfigError(f"THREAD_ID debe ser numérico, recibido {raw_thread!r}")
+
+        raw_price_alerts_thread = os.getenv("PRICE_ALERTS_THREAD_ID", "331017").strip()
+        if not raw_price_alerts_thread.lstrip("-").isdigit():
+            raise ConfigError(
+                f"PRICE_ALERTS_THREAD_ID debe ser numérico, recibido {raw_price_alerts_thread!r}"
+            )
 
         raw_port = os.getenv("WEB_PORT", "8080").strip()
         if not raw_port.isdigit():
@@ -70,6 +77,7 @@ class Settings:
             bot_token=os.environ["TELEGRAM_BOT_TOKEN"].strip(),
             chat_id=os.environ["CHAT_ID"].strip(),
             thread_id=int(raw_thread) if raw_thread else None,
+            price_alerts_thread_id=int(raw_price_alerts_thread),
             timezone=os.getenv("TZ", "Europe/Madrid"),
             dry_run=os.getenv("DRY_RUN", "").strip().lower() in _TRUTHY,
             startup_message=os.getenv("STARTUP_MESSAGE", "Инициализируюсь..."),
