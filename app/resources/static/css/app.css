@@ -397,3 +397,21 @@ body{min-height:100vh;display:flex;flex-direction:column}
     width:100%;
   }
 }
+
+/* ============ alertas de precio (checkboxes por categoria) ============ */
+.alerts-card{background:#fff;border:1px solid var(--line);border-radius:.7rem;padding:1.8rem 2rem;max-width:52rem}
+.alerts-hint{color:var(--mute);font-size:.88rem;margin-bottom:1.4rem;line-height:1.5}
+.instrument-group{border:none;padding:0;margin:0 0 1.6rem}
+.instrument-group legend{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:.7rem;padding:0}
+.instrument-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr));gap:.6rem}
+.instrument-row{display:flex;align-items:center;gap:.55rem;border:1px solid var(--line);border-radius:.5rem;padding:.55rem .75rem;cursor:pointer;background:var(--paper-dim)}
+.instrument-row:has(input:checked){background:#fff;border-color:var(--yellow)}
+.instrument-row input{width:1rem;height:1rem;flex-shrink:0;accent-color:var(--yellow-deep)}
+.instrument-label{font-size:.88rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.instrument-symbol{font-size:.72rem;color:var(--mute);font-family:'Space Grotesk',monospace}
+.alerts-card form > div{margin-top:.4rem}
+.alerts-card button{
+  font-size:1rem;padding:.55rem 1.3rem;cursor:pointer;background:var(--yellow);
+  color:var(--ink);border:none;border-radius:999px;font-weight:600;
+}
+.alerts-card button:hover{background:var(--yellow-deep)}

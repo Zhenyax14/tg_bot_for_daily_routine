@@ -1,0 +1,26 @@
+{% extends "admin/layout.html" %}
+{% block title %}Alertas · Panel Bot{% endblock %}
+{% block heading %}Alertas de precio{% endblock %}
+{% block content %}
+<div class="alerts-card">
+  {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
+  <p class="alerts-hint">Desmarca un valor para dejar de recibir avisos de movimientos bruscos (±5%) sobre él. Los cambios se aplican en el siguiente ciclo (cada 5 minutos), sin reiniciar el bot.</p>
+  <form method="post" action="/admin/alerts">
+    {% for category in categories %}
+    <fieldset class="instrument-group">
+      <legend>{{ category.label }}</legend>
+      <div class="instrument-grid">
+        {% for instrument in category.instruments %}
+        <label class="instrument-row">
+          <input type="checkbox" name="enabled" value="{{ instrument.symbol }}" {% if instrument.enabled %}checked{% endif %}>
+          <span class="instrument-label">{{ instrument.label }}</span>
+          <span class="instrument-symbol">{{ instrument.symbol }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% endfor %}
+    <div><button type="submit">Guardar cambios</button></div>
+  </form>
+</div>
+{% endblock %}

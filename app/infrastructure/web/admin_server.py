@@ -8,6 +8,7 @@ Rutas protegidas (sesion con role=admin):
     /admin                    -> dashboard (inicio del panel)
     /admin/location           -> configure the town/city
     /admin/location/confirm   -> confirm town when the search is ambiguous
+    /admin/alerts             -> enable/disable tracked price-alert instruments
 
 Vistas en resources/views/ (Jinja2), assets en resources/static/. Este modulo
 solo orquesta: arma el contexto y delega el render en ViewRenderer.
@@ -20,10 +21,12 @@ from pathlib import Path
 from aiohttp import web
 
 from application.ports.municipality_directory import MunicipalityDirectory
+from application.services.instrument_settings_service import InstrumentSettingsService
 from application.services.location_service import LocationService
 from application.services.user_service import UserService
 from application.services.uptime_service import UptimeService
 from domain.value_objects.municipality import Municipality
+from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
 
@@ -32,6 +35,15 @@ _SESSION_COOKIE = "session"
 _SESSION_MAX_AGE = 8 * 60 * 60  # 8 horas
 _ADMIN_ROLE = "admin"
 _PUBLIC_PATHS = {"/", "/login", "/logout", "/health"}
+
+_ALERT_CATEGORY_ORDER = ["us_stock", "us_etf", "crypto", "ru_stock", "fx"]
+_ALERT_CATEGORY_LABELS = {
+    "us_stock": "Acciones (Magníficas)",
+    "us_etf": "Fondos (ETF)",
+    "crypto": "Criptomonedas",
+    "ru_stock": "Acciones MOEX",
+    "fx": "Divisas",
+}
 
 # app/infrastructure/web/admin_server.py -> parents[2] = app/
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "resources" / "static"
@@ -45,6 +57,25 @@ def _location_context(location: LocationService, message: str = "", message_clas
         "message_class": message_class,
         "current_ine": m.ine,
         "current_name": m.name,
+    }
+
+
+def _alerts_context(instrument_settings: InstrumentSettingsService, message: str = "", message_class: str = "") -> dict:
+    grouped: dict[str, list[dict]] = {category: [] for category in _ALERT_CATEGORY_ORDER}
+    for instrument in INSTRUMENTS:
+        grouped[instrument.category].append({
+            "symbol": instrument.symbol,
+            "label": instrument.label,
+            "enabled": instrument_settings.is_enabled(instrument.symbol),
+        })
+    return {
+        "active": "alerts",
+        "message": message,
+        "message_class": message_class,
+        "categories": [
+            {"label": _ALERT_CATEGORY_LABELS[category], "instruments": grouped[category]}
+            for category in _ALERT_CATEGORY_ORDER
+        ],
     }
 
 
@@ -88,6 +119,7 @@ def build_admin_app(
     municipality_directory: MunicipalityDirectory,
     user_service: UserService,
     uptime_service: UptimeService,
+    instrument_settings: InstrumentSettingsService,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
@@ -182,6 +214,20 @@ def build_admin_app(
         return html_response("admin/location.html",
                              **_location_context(location, f"Guardado: {name or ine}.", "ok"), **_user_context(request))
 
+    # ---------------- admin: alertas de precio ----------------
+    async def alerts_get(request: web.Request) -> web.Response:
+        return html_response("admin/alerts.html", **_alerts_context(instrument_settings), **_user_context(request))
+
+    async def alerts_post(request: web.Request) -> web.Response:
+        data = await request.post()
+        enabled_symbols = set(data.getall("enabled", []))
+        await instrument_settings.apply_enabled_symbols(enabled_symbols)
+        return html_response(
+            "admin/alerts.html",
+            **_alerts_context(instrument_settings, "Cambios guardados.", "ok"),
+            **_user_context(request),
+        )
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -193,6 +239,8 @@ def build_admin_app(
     app.router.add_get("/admin/location", location_get)
     app.router.add_post("/admin/location", location_post)
     app.router.add_post("/admin/location/confirm", location_confirm)
+    app.router.add_get("/admin/alerts", alerts_get)
+    app.router.add_post("/admin/alerts", alerts_post)
     app.router.add_get("/health", health)
     app.router.add_static("/static/", _STATIC_DIR)
     return app

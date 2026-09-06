@@ -21,6 +21,16 @@ class APSchedulerAdapter:
             misfire_grace_time=_MISFIRE_GRACE_SECONDS,
         )
 
+    def schedule_interval(self, job_id: str, minutes: int, job: Job) -> None:
+        self._scheduler.add_job(
+            job,
+            trigger="interval",
+            minutes=minutes,
+            id=job_id,
+            replace_existing=True,
+            misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+        )
+
     def start(self) -> None:
         self._scheduler.start()
 
