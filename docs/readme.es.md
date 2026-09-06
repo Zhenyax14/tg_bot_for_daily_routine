@@ -30,7 +30,7 @@ Implementado con arquitectura hexagonal (puertos y adaptadores) y patrones táct
 ## Arranque rápido
 
 ```bash
-git clone https://github.com/Zhenyax14/bot2.git && cd bot2
+git clone https://github.com/Zhenyax14/tg_bot_for_daily_routine.git && cd tg_bot_for_daily_routine
 cp docker/.env.example .env      # y rellena los valores
 docker compose -f docker/docker-compose.yaml up -d --build
 docker compose -f docker/docker-compose.yaml logs -f
@@ -69,7 +69,7 @@ La regla que gobierna todo el diseño: **las dependencias apuntan hacia dentro**
 ### Estructura del proyecto
 
 ```
-bot2/
+tg_bot_for_daily_routine/
 ├── app/
 │   ├── main.py                                     
 │   ├── config/
@@ -235,7 +235,7 @@ cd docker && docker compose up -d --build
 Alias recomendado:
 
 ```bash
-alias dcb='docker compose -f /ruta/a/bot2/docker/docker-compose.yaml'
+alias dcb='docker compose -f /ruta/a/tg_bot_for_daily_routine/docker/docker-compose.yaml'
 ```
 
 ### Verificación

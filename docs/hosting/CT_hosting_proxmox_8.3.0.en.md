@@ -23,7 +23,18 @@ the repo**.
 | Features | `nesting=1,keyctl=1` |
 | Boot with node | `onboot: 1` |
 | Runtime | Docker CE + docker-compose-plugin |
-| App path | `/opt/bot2` |
+| App path | `/opt/tg_bot_for_daily_routine` |
+| Web panel port (host) | `8081` → container `bot`'s `8080` |
+
+---
+
+## 0. Access points
+
+| Service | URL / command | Notes |
+|---|---|---|
+| Proxmox web GUI (the node, not the CT) | `https://<NODE-IP>:8006` | Proxmox VE's default port. Replace `<NODE-IP>` with the physical host's IP (not `.204`, that's the CT's). Self-signed cert: the browser will warn. |
+| SSH into the CT | `ssh root@192.168.1.204` | See step 3 |
+| Bot admin panel | `http://192.168.1.204:8081/login` | Requires the `bot` container up (see step 5) and the `.env`'s `ADMIN_USER`/`ADMIN_PASSWORD` |
 
 ---
 
@@ -198,26 +209,45 @@ Should print `Hello from Docker!`. If it gives the
 
 ```bash
 cd /opt
-git clone https://github.com/Zhenyax14/bot2.git
-cd bot2
+git clone https://github.com/Zhenyax14/tg_bot_for_daily_routine.git
+cd tg_bot_for_daily_routine
 
 cp docker/.env.example .env
 nano .env
 chmod 600 .env
 ```
 
-`.env` contents:
+`.env` contents (see `docker/.env.example` for the full template):
 
 ```
+# Telegram
 TELEGRAM_BOT_TOKEN=<token from @BotFather>
 CHAT_ID=-100xxxxxxxxxx
 THREAD_ID=
 STARTUP_MESSAGE=
+
+# PostgreSQL (required since v2.0 — web panel + persistence)
+POSTGRES_USER=tgbot
+POSTGRES_PASSWORD=<strong password>
+POSTGRES_DB=tgbot
+
+# Web admin panel (ADMIN_PASSWORD is required)
+ADMIN_USER=admin
+ADMIN_PASSWORD=<password to log into the panel>
+
+# Initial holiday location (5-digit INE code); change later from
+# /admin/location without restarting
+SPAIN_MUNICIPIO=03031
 ```
 
 > `CHAT_ID` for a supergroup starts with `-100`.
 > `THREAD_ID` empty for groups without topics.
 > `STARTUP_MESSAGE` empty: see the scheduled shutdown note (step 7).
+> `POSTGRES_PASSWORD` and `ADMIN_PASSWORD` are **required**: without them the
+> `postgres` container won't start (`Database is uninitialized and superuser
+> password is not specified`) and `bot` waits forever on its `healthcheck`.
+> The database schema and the admin user are created automatically on first
+> startup — no manual migration step needed.
 
 ### Dry run
 
@@ -251,10 +281,31 @@ docker compose -f docker/docker-compose.yaml logs -f
 Look for `Sent: ...`. If `Failed to send` appears, check the diagnostic table in
 the repo's `README.md`.
 
+Confirm the panel came up, look in the `bot` log for:
+
+```
+INFO bot | Bot started (Europe/Madrid), panel at http://0.0.0.0:8080, location ES=03031
+```
+
+### Accessing the web panel
+
+`docker-compose.yaml` maps the container's internal port `8080` to the CT's
+`8081` (`ports: ["8081:8080"]`). Since the CT has a static IP on the same LAN
+(no NAT), from any machine on the network:
+
+```
+http://192.168.1.204:8081/login
+```
+
+Username and password are `ADMIN_USER` / `ADMIN_PASSWORD` from `.env` (the
+admin user is created once, automatically, on first startup). From
+`/admin/location`, search the municipality by name and save — the holiday
+provider picks up the change immediately, no container restart needed.
+
 ### Alias
 
 ```bash
-echo "alias dcb='docker compose -f /opt/bot2/docker/docker-compose.yaml'" >> ~/.bashrc
+echo "alias dcb='docker compose -f /opt/tg_bot_for_daily_routine/docker/docker-compose.yaml'" >> ~/.bashrc
 ```
 
 ---
@@ -332,6 +383,11 @@ until the midnight `shutdown`. Nothing breaks.
 | `open sysctl net.ipv4.ip_unprivileged_port_start ... permission denied` | CVE-2025-52881 + AppArmor | See step 2 |
 | `pct: command not found` | Command run inside the CT | Run it on the node instead |
 | `Could not chdir to home directory /root` | Flipping `unprivileged` 1→0→1 broke the UIDs | See warning below |
+| `postgres` restart-loops: `Database is uninitialized and superuser password is not specified` | Missing `POSTGRES_PASSWORD` in `.env` | Add it, then `docker compose down -v` (the `pgdata` volume was left half-initialized) before `up` again |
+| `bot` won't start / hangs waiting | `postgres` isn't `healthy` (see cause above) — `depends_on: condition: service_healthy` blocks startup | Fix `postgres` first, then `docker compose up -d` |
+| Bot doesn't reply to `/holidays`, log shows `GET .../municipio/XXXXX.json 404` | The configured location's INE code doesn't exist in `festivos.io` | Set a real municipality from `/admin/location` (by name, not a hand-typed INE code) |
+| A Telegram command doesn't respond and the log says `No error handlers are registered, logging exception` | Uncaught exception in the handler (e.g. the one above) | Check the log traceback; there's no user-facing feedback in Telegram by current design |
+| Web panel unreachable at `192.168.1.204:8081` even though `docker compose ps` shows `bot` as `Up` | Repo checked out at a revision without the panel (`git branch`/`git log` to confirm) | `git pull` on `master` (the panel merged there in "Release 2.0", PR #19) and rebuild |
 
 ### ⚠ Don't flip `unprivileged` by hand
 
@@ -358,13 +414,21 @@ Anything starting with `pct` **always** goes on the node.
 
 | Resource | Assigned | Real usage | Note |
 |---|---|---|---|
-| RAM | 512 MB | ~200-260 MB | Debian ~40 + dockerd ~120 + Python ~70 |
+| RAM | 512 MB | ~200-260 MB (bot only) | Debian ~40 + dockerd ~120 + Python ~70 |
 | Swap | 512 MB | — | Turns an OOM spike into slowness instead |
-| Disk | 5 GB | ~2-2.5 GB | Docker ~400 MB + image ~300 MB |
+| Disk | 5 GB | ~2-2.5 GB (bot only) | Docker ~400 MB + image ~300 MB |
 | CPU | 1 core | ~0% idle | The bot is I/O-bound, not compute |
 
-Calling external APIs (Telegram, LLM) is I/O: roughly 1-2 MB per connection.
-**Doesn't justify more RAM or cores.** Scale up live if ever needed:
+> ⚠️ **These figures are no longer enough as of v2.0 (web panel + PostgreSQL).**
+> The `postgres:17` container adds its own footprint (shared_buffers, helper
+> processes) on top of the above. With only 512 MB assigned to the CT it's
+> easy to hit memory pressure running both containers at once. Bump to
+> **1024 MB RAM** and **8 GB disk** (the `pgdata` volume grows over time)
+> before deploying this version, and confirm with the measurement below.
+
+Calling external APIs (Telegram, LLM, festivos.io) is I/O: roughly 1-2 MB per
+connection. That doesn't justify more RAM or cores — the bump above is for
+Postgres, not the bot. Scale up live if ever needed:
 
 ```bash
 pct set 101 --memory 1024
@@ -405,7 +469,7 @@ DRY_RUN=1 dcb run --rm -e DRY_RUN bot         # dry run
 Verify credentials without starting the app:
 
 ```bash
-set -a; source /opt/bot2/.env; set +a
+set -a; source /opt/tg_bot_for_daily_routine/.env; set +a
 curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" -d text="ping"
 ```
