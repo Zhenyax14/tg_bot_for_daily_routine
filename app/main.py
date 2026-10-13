@@ -29,6 +29,7 @@ from domain.services.price_movement_policy import PriceMovementPolicy
 from domain.value_objects.daily_time import DailyTime
 from domain.value_objects.municipality import Municipality
 from infrastructure.ai.gemini_language_model import GeminiLanguageModel
+from infrastructure.ai.gemini_model_catalog import GeminiModelCatalog
 from infrastructure.config.cities import WORLD_CLOCK_CITIES
 from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.holidays.country_routing import CountryRoutingHolidayProvider
@@ -151,8 +152,10 @@ def build_application(settings: Settings) -> Application:
     # identidad (instrucciones + modelo) vive en BBDD y se edita en /admin/ai.
     ai_personas = AiPersonaService(PostgresAiPersonaRepository(database))
     answer_mention: AnswerMention | None = None
+    model_catalog: GeminiModelCatalog | None = None
     if settings.gemini_api_key:
         answer_mention = AnswerMention(ai_personas, GeminiLanguageModel(settings.gemini_api_key))
+        model_catalog = GeminiModelCatalog(settings.gemini_api_key)
     else:
         logger.warning("GEMINI_API_KEY vacia: asistente IA desactivado")
 
@@ -164,7 +167,7 @@ def build_application(settings: Settings) -> Application:
     municipality_directory = FestivosIoMunicipalityDirectory()
     admin_app = build_admin_app(
         location, municipality_directory, user_service, uptime_service, instrument_settings,
-        ai_personas, answer_mention,
+        ai_personas, answer_mention, model_catalog,
     )
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 

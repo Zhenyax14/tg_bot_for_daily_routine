@@ -22,6 +22,7 @@ from pathlib import Path
 from aiohttp import web
 
 from application.ports.language_model import LanguageModelError
+from application.ports.model_catalog import ModelCatalog, ModelCatalogError, ModelInfo
 from application.ports.municipality_directory import MunicipalityDirectory
 from application.services.ai_persona_service import AiPersonaService
 from application.services.instrument_settings_service import InstrumentSettingsService
@@ -85,9 +86,36 @@ def _alerts_context(instrument_settings: InstrumentSettingsService, message: str
     }
 
 
+def _model_groups(models: tuple[ModelInfo, ...], current: str) -> list[dict]:
+    """Agrupa los modelos para los <optgroup> del desplegable. El modelo
+    guardado siempre aparece, aunque Google ya no lo liste."""
+    groups = {"stable": [], "alias": [], "preview": []}
+    for model in models:
+        if "preview" in model.id or "exp" in model.id:
+            groups["preview"].append(model)
+        elif model.id.endswith("-latest"):
+            groups["alias"].append(model)
+        else:
+            groups["stable"].append(model)
+    result = [
+        {"label": label, "models": groups[key]}
+        for key, label in (
+            ("stable", "Estables"),
+            ("alias", "Alias (Google los cambia de versión solo)"),
+            ("preview", "Preview / experimentales"),
+        )
+        if groups[key]
+    ]
+    if current not in {m.id for m in models}:
+        result.insert(0, {"label": "Guardado (no listado)", "models": [ModelInfo(current, current)]})
+    return result
+
+
 def _ai_context(
     persona: AiPersona,
     available: bool,
+    model_groups: list[dict],
+    catalog_error: str = "",
     message: str = "",
     message_class: str = "",
     test_prompt: str = "",
@@ -99,6 +127,8 @@ def _ai_context(
         "message_class": message_class,
         "persona": persona,
         "available": available,
+        "model_groups": model_groups,
+        "catalog_error": catalog_error,
         "max_length": MAX_SYSTEM_INSTRUCTION_LENGTH,
         "test_prompt": test_prompt,
         "test_answer": test_answer,
@@ -148,6 +178,7 @@ def build_admin_app(
     instrument_settings: InstrumentSettingsService,
     ai_personas: AiPersonaService,
     answer_mention: AnswerMention | None,
+    model_catalog: ModelCatalog | None,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
@@ -257,46 +288,57 @@ def build_admin_app(
         )
 
     # ---------------- admin: asistente IA ----------------
+    async def available_models() -> tuple[tuple[ModelInfo, ...], str]:
+        if model_catalog is None:
+            return (), ""
+        try:
+            return await model_catalog.list_models(), ""
+        except ModelCatalogError as exc:
+            return (), f"No se pudo obtener la lista de modelos ({exc}). Solo se muestra el guardado."
+
+    async def render_ai(request: web.Request, persona: AiPersona, message: str = "",
+                        message_class: str = "", test_prompt: str = "", test_answer: str = "") -> web.Response:
+        models, catalog_error = await available_models()
+        return html_response("admin/ai.html", **_ai_context(
+            persona, answer_mention is not None, _model_groups(models, persona.model), catalog_error,
+            message, message_class, test_prompt, test_answer,
+        ), **_user_context(request))
+
     async def ai_get(request: web.Request) -> web.Response:
-        return html_response(
-            "admin/ai.html", **_ai_context(ai_personas.current, answer_mention is not None), **_user_context(request)
-        )
+        return await render_ai(request, ai_personas.current)
 
     async def ai_post(request: web.Request) -> web.Response:
         data = await request.post()
-        available = answer_mention is not None
         try:
             persona = AiPersona(
                 system_instruction=str(data.get("system_instruction", "")).replace("\r\n", "\n").strip(),
-                model=str(data.get("model", "")).strip().lower(),
+                model=str(data.get("model", "")).strip(),
                 enabled=data.get("enabled") == "on",
             )
         except ValueError as exc:
-            return html_response(
-                "admin/ai.html", **_ai_context(ai_personas.current, available, str(exc), "err"), **_user_context(request)
-            )
+            return await render_ai(request, ai_personas.current, str(exc), "err")
+
+        # El desplegable solo ofrece modelos listados (o el ya guardado); se
+        # revalida aqui por si el POST llega manipulado o la lista cambio.
+        models, _ = await available_models()
+        if models and persona.model != ai_personas.current.model and persona.model not in {m.id for m in models}:
+            return await render_ai(request, ai_personas.current, f"Modelo no disponible: {persona.model}.", "err")
 
         if data.get("action") != "test":
             await ai_personas.change(persona)
-            return html_response(
-                "admin/ai.html", **_ai_context(persona, available, "Identidad guardada.", "ok"), **_user_context(request)
-            )
+            return await render_ai(request, persona, "Identidad guardada.", "ok")
 
         # Probar: usa lo escrito en el formulario SIN guardarlo.
         test_prompt = str(data.get("test_prompt", "")).strip()
-        if not available:
-            return html_response("admin/ai.html", **_ai_context(
-                persona, available, "Falta GEMINI_API_KEY en el .env.", "err", test_prompt), **_user_context(request))
+        if answer_mention is None:
+            return await render_ai(request, persona, "Falta GEMINI_API_KEY en el .env.", "err", test_prompt)
         if not test_prompt:
-            return html_response("admin/ai.html", **_ai_context(
-                persona, available, "Escribe un mensaje de prueba.", "err"), **_user_context(request))
+            return await render_ai(request, persona, "Escribe un mensaje de prueba.", "err")
         try:
             answer = await answer_mention.execute([ChatTurn("user", test_prompt)], persona)
         except LanguageModelError as exc:
-            return html_response("admin/ai.html", **_ai_context(
-                persona, available, str(exc), "err", test_prompt), **_user_context(request))
-        return html_response("admin/ai.html", **_ai_context(
-            persona, available, "Prueba realizada (sin guardar).", "ok", test_prompt, answer), **_user_context(request))
+            return await render_ai(request, persona, str(exc), "err", test_prompt)
+        return await render_ai(request, persona, "Prueba realizada (sin guardar).", "ok", test_prompt, answer)
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")

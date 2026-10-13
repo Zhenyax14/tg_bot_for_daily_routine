@@ -119,8 +119,10 @@ docker compose -f docker/docker-compose.yaml logs -f
 DRY_RUN=1 docker compose -f docker/docker-compose.yaml run --rm -e DRY_RUN bot
 ```
 
-**Browser cache gotcha:** after editing CSS/views, hard-reload with
-**Ctrl+Shift+R**. A stale cached page once looked completely unstyled while
+**Browser cache:** layouts reference assets via `{{ asset('css/app.css') }}`
+(`ViewRenderer` global → `/static/css/app.css?v=<mtime>`), so a changed file
+gets a new URL and no hard-reload is needed after a deploy. Before that,
+**Ctrl+Shift+R** was required. A stale cached page once looked completely unstyled while
 `curl -i http://localhost:8081/static/css/app.css` returned `200 OK` — always
 `curl` the asset before assuming a backend bug.
 
@@ -484,19 +486,28 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   header `x-goog-api-key`. Default model `gemini-3.1-flash-lite` (oldest stable model still open to new keys; `gemini-2.5-flash` returns 404 "no longer available to new users", newer flash models hit 503 overloads). **No
   temperature/top_p/top_k sent** — deprecated from Gemini 3.6 Flash on.
   Parts with `thought: true` are dropped.
+- **Model dropdown:** `/admin/ai` lists the models the key can use
+  (`ModelCatalog` port → `GeminiModelCatalog`, `GET v1beta/models`, cached 1 h,
+  only `gemini*` with `generateContent`, minus tts/audio/transcribe/image/
+  nano-banana/embedding/live). Grouped as Estables / Alias (`-latest`) /
+  Preview. The saved model always shows even if Google stops listing it; if
+  the listing fails, only the saved one is shown and saving isn't blocked.
+  Listed ≠ usable: `gemini-2.5-flash` is listed but 404s for new keys.
 - Files: `domain/value_objects/ai_persona.py`,
   `domain/repositories/ai_persona_repository.py`,
   `domain/value_objects/chat_turn.py`,
   `application/ports/language_model.py` (`LanguageModel`, `LanguageModelError`),
   `application/services/conversation_memory.py`,
+  `application/ports/model_catalog.py`, `infrastructure/ai/gemini_model_catalog.py`,
   `application/services/ai_persona_service.py`,
   `application/use_cases/answer_mention.py`,
   `infrastructure/ai/gemini_language_model.py`,
   `infrastructure/persistence/postgres_ai_persona_repository.py`,
   `infrastructure/telegram/ai_mention_handler.py`,
   `resources/views/admin/ai.html`.
-- `build_admin_app(...)` gained `ai_personas` and `answer_mention` (6th/7th,
-  before `renderer`); `answer_mention` is `None` when `GEMINI_API_KEY` is empty.
+- `build_admin_app(...)` gained `ai_personas`, `answer_mention` and
+  `model_catalog` (6th–8th, before `renderer`); the last two are `None` when
+  `GEMINI_API_KEY` is empty.
 - Not built (yet): per-user rate limit; Markdown → Telegram formatting
   (answers are sent as plain text, so `**bold**` shows literal asterisks).
 

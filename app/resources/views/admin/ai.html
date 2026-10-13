@@ -19,7 +19,23 @@
       placeholder="Eres «Bot», el asistente del grupo. Respondes siempre en ruso, con tono cercano y breve…">{{ persona.system_instruction }}</textarea>
 
     <label class="ai-label" for="model">Modelo de Gemini</label>
-    <input id="model" name="model" value="{{ persona.model }}" required>
+    <div class="ai-select">
+      <select id="model" name="model" required>
+        {% for group in model_groups %}
+        <optgroup label="{{ group.label }}">
+          {% for model in group.models %}
+          <option value="{{ model.id }}" {% if model.id == persona.model %}selected{% endif %}>{{ model.display_name }} — {{ model.id }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      <svg class="ai-select-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    {% if catalog_error %}<p class="ai-note err">{{ catalog_error }}</p>{% endif %}
+    <p class="ai-note">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-width="2"/><path d="M12 11v5M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Lista de Google para tu clave, actualizada cada hora. Algunos modelos antiguos aparecen pero ya no funcionan: compruébalo con <strong>Probar</strong> antes de guardar.</span>
+    </p>
 
     <div class="ai-actions">
       <button type="submit" name="action" value="save">Guardar identidad</button>
