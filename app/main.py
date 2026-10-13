@@ -52,7 +52,7 @@ from infrastructure.quotes.routing_quote_provider import RoutingQuoteProvider
 from infrastructure.quotes.yahoo_finance_quote_provider import YahooFinanceQuoteProvider
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
 from infrastructure.security.bcrypt_password_hasher import BcryptPasswordHasher
-from infrastructure.telegram.ai_mention_handler import AiMentionHandler
+from infrastructure.telegram.ai_mention_handler import ALBUM_IMAGES, AiMentionHandler
 from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
 from infrastructure.telegram.holiday_formatting import format_holiday_greeting
@@ -211,8 +211,11 @@ def build_application(settings: Settings) -> Application:
     if answer_mention is not None:
         application.add_handler(MessageHandler(
             filters.Chat(chat_id=int(settings.chat_id)) & ~filters.COMMAND
-            & (filters.TEXT | filters.PHOTO | filters.Document.IMAGE)
-            & (filters.Entity("mention") | filters.CaptionEntity("mention") | filters.REPLY),
+            & (
+                (filters.TEXT | filters.PHOTO | filters.Document.IMAGE)
+                & (filters.Entity("mention") | filters.CaptionEntity("mention") | filters.REPLY)
+                | ALBUM_IMAGES
+            ),
             AiMentionHandler(answer_mention, ConversationMemory()),
         ))
     return application

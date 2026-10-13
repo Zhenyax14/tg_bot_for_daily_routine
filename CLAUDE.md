@@ -487,7 +487,7 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   temperature/top_p/top_k sent** — deprecated from Gemini 3.6 Flash on.
   Parts with `thought: true` are dropped.
 - **Images (vision):** photos and uncompressed image files (`image/jpeg|png|
-  webp|heic|heif`, ≤ 15 MB) are sent to Gemini as `inline_data` parts (images
+  webp|heic|heif`, ≤ 14 MB) are sent to Gemini as `inline_data` parts (images
   first, then text). Covered: photo whose **caption** @mentions the bot
   (`filters.CaptionEntity("mention")`); a text mention **replying to someone's
   photo** (quoted image attached); a photo **replying to a bot message**.
@@ -495,11 +495,22 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   caps total image bytes (64 MB, evicts oldest threads). Telegram "photos" are
   always JPEG; the largest `PhotoSize` is downloaded. GIF/other → Russian
   "format not supported" reply; > 15 MB → "too large" (checked on
-  `file_size` before downloading). **Albums:** each photo is its own update,
-  so only the captioned one reaches the model. Before this, the handler
+  `file_size` before downloading). **Albums:** Telegram sends each photo as
+  its own message sharing `media_group_id` (only one carries the caption).
+  `ALBUM_IMAGES` lets every album image through the filter (needs privacy
+  mode OFF, which mentions already require); `AlbumCollector` buffers them
+  and, after 2 s without a new piece, answers **once**, replying to the
+  captioned message, with all images in order. Albums with no mention and no
+  reply to the bot are dropped without downloading.
+- **Image budget:** a Gemini request allows ~20 MB and images go as base64
+  (+33 %), so 14 MB raw is the cap per image *and* per request
+  (`MAX_REQUEST_IMAGE_BYTES`). An album over it gets a Russian "too large"
+  reply. For long threads, `AnswerMention` runs `fit_images()`: keeps the
+  newest images, drops older ones and tags those turns with
+  `[изображения из этого сообщения больше недоступны]`. Before this, the handler
   filtered `filters.TEXT` only and the model *claimed* it could see photos it
   never received. `/admin/ai` "Probar" accepts an optional image upload
-  (multipart; `client_max_size` raised to 16 MB).
+  (multipart; `client_max_size` = 15 MB).
 - **Model dropdown:** `/admin/ai` lists the models the key can use
   (`ModelCatalog` port → `GeminiModelCatalog`, `GET v1beta/models`, cached 1 h,
   only `gemini*` with `generateContent`, minus tts/audio/transcribe/image/
@@ -518,6 +529,7 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   `infrastructure/ai/gemini_language_model.py`,
   `infrastructure/persistence/postgres_ai_persona_repository.py`,
   `infrastructure/telegram/ai_mention_handler.py`,
+  `infrastructure/telegram/album_collector.py`,
   `resources/views/admin/ai.html`.
 - `build_admin_app(...)` gained `ai_personas`, `answer_mention` and
   `model_catalog` (6th–8th, before `renderer`); the last two are `None` when

@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 
 # Formatos de imagen que acepta Gemini como inline_data.
 SUPPORTED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"})
-MAX_IMAGE_BYTES = 15 * 1024 * 1024  # la peticion inline a Gemini admite ~20 MB en total
+# Una peticion a Gemini admite ~20 MB en total y las imagenes viajan en
+# base64 (+33 %): 14 MB de imagen cruda es el maximo que cabe en una sola
+# peticion. Es a la vez el limite por imagen y el presupuesto por peticion.
+MAX_IMAGE_BYTES = 14 * 1024 * 1024
+MAX_REQUEST_IMAGE_BYTES = MAX_IMAGE_BYTES
 
 
 class ImageTooLarge(ValueError):
