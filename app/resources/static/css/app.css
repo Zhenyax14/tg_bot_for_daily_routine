@@ -415,3 +415,23 @@ body{min-height:100vh;display:flex;flex-direction:column}
   color:var(--ink);border:none;border-radius:999px;font-weight:600;
 }
 .alerts-card button:hover{background:var(--yellow-deep)}
+/* ============ asistente IA (identidad + prueba) ============ */
+.ai-card .msg{padding:.7rem .85rem;border-radius:.45rem;margin:0 0 1.25rem;font-size:.85rem;line-height:1.4}
+.ai-card .msg.ok{background:#e6f4ea;color:#246b38;border:1px solid #c9e8d2}
+.ai-card .msg.err{background:#fce8e6;color:#a5281b;border:1px solid #f3c7c2}
+.ai-card code{font-family:'Space Grotesk',monospace;font-size:.85em}
+.ai-label{display:block;margin:1.2rem 0 .5rem;font-size:.85rem;font-weight:600;color:var(--ink-soft)}
+.ai-toggle{display:flex;align-items:center;gap:.55rem;font-size:.9rem;cursor:pointer}
+.ai-toggle input{width:1rem;height:1rem;accent-color:var(--yellow-deep)}
+.ai-card textarea,.ai-card input:not([type=checkbox]){
+  display:block;width:100%;padding:.7rem .85rem;font:inherit;font-size:.92rem;color:var(--ink);
+  background:#fff;border:1px solid var(--line);border-radius:.45rem;outline:none;resize:vertical;
+  transition:border-color .15s ease,box-shadow .15s ease;
+}
+.ai-card input:not([type=checkbox]){height:2.8rem;max-width:22rem}
+.ai-card textarea:focus,.ai-card input:not([type=checkbox]):focus{border-color:var(--yellow-deep);box-shadow:0 0 0 3px rgba(244,180,0,.16)}
+.ai-actions{margin-top:1rem}
+.ai-test{margin-top:2rem;padding-top:1.4rem;border-top:1px solid var(--line)}
+.ai-card button.ai-secondary{background:transparent;border:1px solid var(--line)}
+.ai-card button.ai-secondary:hover{border-color:var(--yellow-deep);background:var(--paper-dim)}
+.ai-answer{margin-top:1rem;padding:1rem;background:var(--paper-dim);border:1px solid var(--line);border-radius:.5rem;white-space:pre-wrap;font:inherit;font-size:.9rem;line-height:1.5}

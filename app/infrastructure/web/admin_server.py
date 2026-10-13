@@ -9,6 +9,7 @@ Rutas protegidas (sesion con role=admin):
     /admin/location           -> configure the town/city
     /admin/location/confirm   -> confirm town when the search is ambiguous
     /admin/alerts             -> enable/disable tracked price-alert instruments
+    /admin/ai                 -> AI assistant identity (Gemini) + test prompt
 
 Vistas en resources/views/ (Jinja2), assets en resources/static/. Este modulo
 solo orquesta: arma el contexto y delega el render en ViewRenderer.
@@ -20,11 +21,16 @@ from pathlib import Path
 
 from aiohttp import web
 
+from application.ports.language_model import LanguageModelError
 from application.ports.municipality_directory import MunicipalityDirectory
+from application.services.ai_persona_service import AiPersonaService
 from application.services.instrument_settings_service import InstrumentSettingsService
 from application.services.location_service import LocationService
 from application.services.user_service import UserService
 from application.services.uptime_service import UptimeService
+from application.use_cases.answer_mention import AnswerMention
+from domain.value_objects.ai_persona import MAX_SYSTEM_INSTRUCTION_LENGTH, AiPersona
+from domain.value_objects.chat_turn import ChatTurn
 from domain.value_objects.municipality import Municipality
 from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.web.session_store import SessionStore
@@ -79,6 +85,26 @@ def _alerts_context(instrument_settings: InstrumentSettingsService, message: str
     }
 
 
+def _ai_context(
+    persona: AiPersona,
+    available: bool,
+    message: str = "",
+    message_class: str = "",
+    test_prompt: str = "",
+    test_answer: str = "",
+) -> dict:
+    return {
+        "active": "ai",
+        "message": message,
+        "message_class": message_class,
+        "persona": persona,
+        "available": available,
+        "max_length": MAX_SYSTEM_INSTRUCTION_LENGTH,
+        "test_prompt": test_prompt,
+        "test_answer": test_answer,
+    }
+
+
 def _user_context(request: web.Request) -> dict:
     user = request.get("user")
     if user is None:
@@ -120,6 +146,8 @@ def build_admin_app(
     user_service: UserService,
     uptime_service: UptimeService,
     instrument_settings: InstrumentSettingsService,
+    ai_personas: AiPersonaService,
+    answer_mention: AnswerMention | None,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
@@ -228,6 +256,48 @@ def build_admin_app(
             **_user_context(request),
         )
 
+    # ---------------- admin: asistente IA ----------------
+    async def ai_get(request: web.Request) -> web.Response:
+        return html_response(
+            "admin/ai.html", **_ai_context(ai_personas.current, answer_mention is not None), **_user_context(request)
+        )
+
+    async def ai_post(request: web.Request) -> web.Response:
+        data = await request.post()
+        available = answer_mention is not None
+        try:
+            persona = AiPersona(
+                system_instruction=str(data.get("system_instruction", "")).replace("\r\n", "\n").strip(),
+                model=str(data.get("model", "")).strip().lower(),
+                enabled=data.get("enabled") == "on",
+            )
+        except ValueError as exc:
+            return html_response(
+                "admin/ai.html", **_ai_context(ai_personas.current, available, str(exc), "err"), **_user_context(request)
+            )
+
+        if data.get("action") != "test":
+            await ai_personas.change(persona)
+            return html_response(
+                "admin/ai.html", **_ai_context(persona, available, "Identidad guardada.", "ok"), **_user_context(request)
+            )
+
+        # Probar: usa lo escrito en el formulario SIN guardarlo.
+        test_prompt = str(data.get("test_prompt", "")).strip()
+        if not available:
+            return html_response("admin/ai.html", **_ai_context(
+                persona, available, "Falta GEMINI_API_KEY en el .env.", "err", test_prompt), **_user_context(request))
+        if not test_prompt:
+            return html_response("admin/ai.html", **_ai_context(
+                persona, available, "Escribe un mensaje de prueba.", "err"), **_user_context(request))
+        try:
+            answer = await answer_mention.execute([ChatTurn("user", test_prompt)], persona)
+        except LanguageModelError as exc:
+            return html_response("admin/ai.html", **_ai_context(
+                persona, available, str(exc), "err", test_prompt), **_user_context(request))
+        return html_response("admin/ai.html", **_ai_context(
+            persona, available, "Prueba realizada (sin guardar).", "ok", test_prompt, answer), **_user_context(request))
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -241,6 +311,8 @@ def build_admin_app(
     app.router.add_post("/admin/location/confirm", location_confirm)
     app.router.add_get("/admin/alerts", alerts_get)
     app.router.add_post("/admin/alerts", alerts_post)
+    app.router.add_get("/admin/ai", ai_get)
+    app.router.add_post("/admin/ai", ai_post)
     app.router.add_get("/health", health)
     app.router.add_static("/static/", _STATIC_DIR)
     return app

@@ -33,7 +33,7 @@ que documenta la aplicación; aquí solo está lo que **no se deduce del repo**.
 |---|---|---|
 | GUI web de Proxmox (el nodo, no el CT) | `https://<IP-DEL-NODO>:8006` | Puerto por defecto de Proxmox VE. Sustituir `<IP-DEL-NODO>` por la IP del host físico (no es la `.204`, esa es del CT). Certificado autofirmado: el navegador avisará. |
 | SSH al CT | `ssh root@192.168.1.204` | Ver paso 3 |
-| Panel de administración del bot | `http://192.168.1.204:8081/login` | Requiere el contenedor `bot` levantado (ver paso 5) y las credenciales `ADMIN_USER`/`ADMIN_PASSWORD` del `.env` |
+| Panel de administración del bot | `http://192.168.1.204:8081/login` | Requiere el contenedor `bot` levantado (ver paso 5) y las credenciales `ADMIN_USER`/`ADMIN_PASSWORD` del `../../docker/.env` |
 
 ---
 
@@ -214,7 +214,7 @@ nano .env
 chmod 600 .env
 ```
 
-Contenido del `../../.env` (ver `docker/.env.example` para la plantilla completa):
+Contenido del `../../docker/.env` (ver `docker/.env.example` para la plantilla completa):
 
 ```
 # Telegram
@@ -295,7 +295,7 @@ LAN (sin NAT), desde cualquier equipo de la red:
 http://192.168.1.204:8081/login
 ```
 
-Usuario y contraseña son `ADMIN_USER` / `ADMIN_PASSWORD` del `.env` (el
+Usuario y contraseña son `ADMIN_USER` / `ADMIN_PASSWORD` del `../../docker/.env` (el
 usuario admin se crea solo, una vez, en el primer arranque). Desde
 `/admin/location` se busca el municipio por nombre y se guarda — el cambio lo
 recoge el proveedor de festivos al vuelo, sin reiniciar el contenedor.
@@ -362,7 +362,7 @@ timedatectl set-timezone Europe/Madrid
 
 El mensaje de arranque se envía en **cada** arranque, por diseño. Con el cron
 activo eso significa un mensaje diario al grupo a las 06:45. Dejar
-`STARTUP_MESSAGE=` vacío en el `../../.env`.
+`STARTUP_MESSAGE=` vacío en el `../../docker/.env`.
 
 ### Solape con `onboot`
 
@@ -381,7 +381,7 @@ hasta el `shutdown` de medianoche. No rompe nada.
 | `open sysctl net.ipv4.ip_unprivileged_port_start ... permission denied` | CVE-2025-52881 + AppArmor | Ver paso 2 |
 | `pct: command not found` | Comando lanzado dentro del CT | Ejecutarlo en el nodo |
 | `Could not chdir to home directory /root` | Flip `unprivileged` 1→0→1 desbarató los UIDs | Ver aviso abajo |
-| `postgres` reinicia en bucle: `Database is uninitialized and superuser password is not specified` | Falta `POSTGRES_PASSWORD` en `.env` | Añadirla y `docker compose down -v` (el volumen `pgdata` quedó a medio inicializar) antes de volver a `up` |
+| `postgres` reinicia en bucle: `Database is uninitialized and superuser password is not specified` | Falta `POSTGRES_PASSWORD` en `../../docker/.env` | Añadirla y `docker compose down -v` (el volumen `pgdata` quedó a medio inicializar) antes de volver a `up` |
 | `bot` no arranca / se queda esperando | `postgres` no está `healthy` (ver causa anterior) — `depends_on: condition: service_healthy` bloquea el arranque | Arreglar `postgres` primero, luego `docker compose up -d` |
 | El bot no responde a `/holidays`, log muestra `GET .../municipio/XXXXX.json 404` | Código INE de la localidad configurada no existe en `festivos.io` | Fijar un municipio real desde `/admin/location` (por nombre, no INE a mano) |
 | Un comando de Telegram no responde y el log dice `No error handlers are registered, logging exception` | Excepción sin capturar en el handler (p. ej. la del punto anterior) | Revisar el traceback del log; no hay feedback al usuario en Telegram por diseño actual |

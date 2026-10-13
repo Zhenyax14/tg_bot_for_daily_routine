@@ -34,7 +34,7 @@ the repo**.
 |---|---|---|
 | Proxmox web GUI (the node, not the CT) | `https://<NODE-IP>:8006` | Proxmox VE's default port. Replace `<NODE-IP>` with the physical host's IP (not `.204`, that's the CT's). Self-signed cert: the browser will warn. |
 | SSH into the CT | `ssh root@192.168.1.204` | See step 3 |
-| Bot admin panel | `http://192.168.1.204:8081/login` | Requires the `bot` container up (see step 5) and the `.env`'s `ADMIN_USER`/`ADMIN_PASSWORD` |
+| Bot admin panel | `http://192.168.1.204:8081/login` | Requires the `bot` container up (see step 5) and the `../../docker/.env`'s `ADMIN_USER`/`ADMIN_PASSWORD` |
 
 ---
 
@@ -217,7 +217,7 @@ nano .env
 chmod 600 .env
 ```
 
-`.env` contents (see `docker/.env.example` for the full template):
+`../../docker/.env` contents (see `docker/.env.example` for the full template):
 
 ```
 # Telegram
@@ -297,7 +297,7 @@ INFO bot | Bot started (Europe/Madrid), panel at http://0.0.0.0:8080, location E
 http://192.168.1.204:8081/login
 ```
 
-Username and password are `ADMIN_USER` / `ADMIN_PASSWORD` from `.env` (the
+Username and password are `ADMIN_USER` / `ADMIN_PASSWORD` from `../../docker/.env` (the
 admin user is created once, automatically, on first startup). From
 `/admin/location`, search the municipality by name and save — the holiday
 provider picks up the change immediately, no container restart needed.
@@ -364,7 +364,7 @@ timedatectl set-timezone Europe/Madrid
 
 The startup message is sent on **every** startup, by design. With the cron
 active, that means a daily message to the group at 06:45. Leave
-`STARTUP_MESSAGE=` empty in the `.env`.
+`STARTUP_MESSAGE=` empty in the `../../docker/.env`.
 
 ### Overlap with `onboot`
 
@@ -383,7 +383,7 @@ until the midnight `shutdown`. Nothing breaks.
 | `open sysctl net.ipv4.ip_unprivileged_port_start ... permission denied` | CVE-2025-52881 + AppArmor | See step 2 |
 | `pct: command not found` | Command run inside the CT | Run it on the node instead |
 | `Could not chdir to home directory /root` | Flipping `unprivileged` 1→0→1 broke the UIDs | See warning below |
-| `postgres` restart-loops: `Database is uninitialized and superuser password is not specified` | Missing `POSTGRES_PASSWORD` in `.env` | Add it, then `docker compose down -v` (the `pgdata` volume was left half-initialized) before `up` again |
+| `postgres` restart-loops: `Database is uninitialized and superuser password is not specified` | Missing `POSTGRES_PASSWORD` in `../../docker/.env` | Add it, then `docker compose down -v` (the `pgdata` volume was left half-initialized) before `up` again |
 | `bot` won't start / hangs waiting | `postgres` isn't `healthy` (see cause above) — `depends_on: condition: service_healthy` blocks startup | Fix `postgres` first, then `docker compose up -d` |
 | Bot doesn't reply to `/holidays`, log shows `GET .../municipio/XXXXX.json 404` | The configured location's INE code doesn't exist in `festivos.io` | Set a real municipality from `/admin/location` (by name, not a hand-typed INE code) |
 | A Telegram command doesn't respond and the log says `No error handlers are registered, logging exception` | Uncaught exception in the handler (e.g. the one above) | Check the log traceback; there's no user-facing feedback in Telegram by current design |

@@ -22,6 +22,14 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS instrument_disabled (
     symbol text PRIMARY KEY
 );
+
+CREATE TABLE IF NOT EXISTS ai_persona (
+    id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+    system_instruction text NOT NULL DEFAULT '',
+    model              text NOT NULL,
+    enabled            boolean NOT NULL DEFAULT true,
+    updated_at         timestamptz NOT NULL DEFAULT now()
+);
 """
 
 

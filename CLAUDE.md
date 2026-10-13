@@ -97,7 +97,7 @@ Conventional Commits, using the **subdomain** as scope (not the layer), e.g.
 
 ## 3. Deployment / Docker
 
-- Compose file: `bot2/docker/docker-compose.yaml`; `.env` at **repo root**
+- Compose file: `bot2/docker/docker-compose.yaml`; `docker/.env` at **repo root**
   (`../.env` from the compose file). Services: `bot` + `postgres:17`, volume
   `pgdata`.
 - Web panel is published on **host 8081** → container 8080
@@ -152,7 +152,7 @@ All env vars are read and validated **once** at startup; if a required one is
 missing the process exits with code 1 listing all missing vars.
 
 `DATABASE_URL` is **built programmatically** from `POSTGRES_*` components — it is
-**never** stored directly in `.env` (that caused a password desync bug). Single
+**never** stored directly in `docker/.env` (that caused a password desync bug). Single
 source of truth for the DB password is `POSTGRES_PASSWORD`.
 
 Key vars:
@@ -173,6 +173,7 @@ Key vars:
 | `DRY_RUN` | no | `false` | `1/true/yes/on` → ConsoleNotifier, no network |
 | `STARTUP_MESSAGE` | no | `Инициализируюсь...` | sent on every startup |
 | `PRICE_ALERTS_THREAD_ID` | no | `331017` | topic id for price-alert messages, same group as `CHAT_ID` |
+| `GEMINI_API_KEY` | no | empty | Google Gemini key; empty = AI assistant disabled (see §8.8) |
 
 ---
 
@@ -190,6 +191,10 @@ Applied idempotently on every startup (`CREATE TABLE IF NOT EXISTS` +
   instrument is disabled for price alerts. Absence = enabled (the default);
   this way adding/removing instruments from the code catalog never needs a
   migration. See §8.7.
+
+- **`ai_persona`** — single-row table (`id boolean PK DEFAULT true CHECK (id)`,
+  `system_instruction text`, `model text`, `enabled boolean`, `updated_at`).
+  The AI assistant's identity, edited from `/admin/ai`. See §8.8.
 
 Passwords are bcrypt (salted, irreversible). Never stored in cleartext.
 
@@ -452,6 +457,48 @@ stored in Postgres and editable from `/admin/alerts` without restarting the bot.
   gate, category grouping renders, POST persists exactly the checked set,
   a follow-up GET reflects it, and `CheckPriceMovements` skips fetching
   disabled symbols entirely (not just skips alerting on them).
+
+### 8.8 AI assistant (Gemini) — built, pending live test
+
+In the group's **General** topic (messages with `is_topic_message == False`,
+same `CHAT_ID`), a message that **@mentions the bot** or **replies to one of
+its messages** is sent as a prompt to Google Gemini; the answer is posted as a
+plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
+(bots still receive mentions and replies to themselves).
+
+- **Identity** = Gemini `system_instruction` + model name + on/off switch,
+  stored in `ai_persona` (§5) and edited at `/admin/ai` (sidebar "IA"). It's
+  cached in memory (`AiPersonaService`, `LocationService` pattern), so changes
+  apply to the next mention without restarting. The panel also has
+  **"Probar"**: runs a test prompt with the *unsaved* form values.
+- **Conversation threads:** replying to a bot message sends Gemini a
+  turn-based conversation (bot = `model`, people = `user`, each user turn
+  prefixed with `[Сообщение от <name>]`). The full thread behind each bot
+  reply is kept in memory (`ConversationMemory`: 500 threads × 20 turns, keyed
+  by `(chat_id, message_id)`, lost on restart → falls back to the quoted bot
+  message alone). **Never** pass the bot's own message as quoted third-party
+  text: the model answers it and "talks to itself" (bug fixed 2026-10-14).
+  A mention that replies to a *human* message includes that message as quoted
+  context in a single `user` turn.
+- Gemini REST via `httpx` (no SDK): `POST v1beta/models/{model}:generateContent`,
+  header `x-goog-api-key`. Default model `gemini-3.1-flash-lite` (oldest stable model still open to new keys; `gemini-2.5-flash` returns 404 "no longer available to new users", newer flash models hit 503 overloads). **No
+  temperature/top_p/top_k sent** — deprecated from Gemini 3.6 Flash on.
+  Parts with `thought: true` are dropped.
+- Files: `domain/value_objects/ai_persona.py`,
+  `domain/repositories/ai_persona_repository.py`,
+  `domain/value_objects/chat_turn.py`,
+  `application/ports/language_model.py` (`LanguageModel`, `LanguageModelError`),
+  `application/services/conversation_memory.py`,
+  `application/services/ai_persona_service.py`,
+  `application/use_cases/answer_mention.py`,
+  `infrastructure/ai/gemini_language_model.py`,
+  `infrastructure/persistence/postgres_ai_persona_repository.py`,
+  `infrastructure/telegram/ai_mention_handler.py`,
+  `resources/views/admin/ai.html`.
+- `build_admin_app(...)` gained `ai_personas` and `answer_mention` (6th/7th,
+  before `renderer`); `answer_mention` is `None` when `GEMINI_API_KEY` is empty.
+- Not built (yet): per-user rate limit; Markdown → Telegram formatting
+  (answers are sent as plain text, so `**bold**` shows literal asterisks).
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)
 

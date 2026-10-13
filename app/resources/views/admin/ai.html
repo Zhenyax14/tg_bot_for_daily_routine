@@ -1,0 +1,38 @@
+{% extends "admin/layout.html" %}
+{% block title %}IA · Panel Bot{% endblock %}
+{% block heading %}Asistente IA{% endblock %}
+{% block content %}
+<div class="alerts-card ai-card">
+  {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
+  {% if not available %}
+  <div class="msg err">Falta <code>GEMINI_API_KEY</code> en el <code>.env</code>: el bot no responderá a menciones hasta que la añadas y reinicies.</div>
+  {% endif %}
+  <p class="alerts-hint">El bot responde en el hilo <strong>General</strong> cuando alguien lo menciona (<code>@nombrebot pregunta…</code>) o responde a uno de sus mensajes. Aquí defines su identidad: quién es, cómo habla y qué sabe. Se guarda en la base de datos y se aplica al instante, sin reiniciar.</p>
+  <form method="post" action="/admin/ai">
+    <label class="ai-toggle">
+      <input type="checkbox" name="enabled" {% if persona.enabled %}checked{% endif %}>
+      <span>Responder a menciones en Telegram</span>
+    </label>
+
+    <label class="ai-label" for="system_instruction">Identidad (instrucciones de sistema)</label>
+    <textarea id="system_instruction" name="system_instruction" rows="14" maxlength="{{ max_length }}"
+      placeholder="Eres «Bot», el asistente del grupo. Respondes siempre en ruso, con tono cercano y breve…">{{ persona.system_instruction }}</textarea>
+
+    <label class="ai-label" for="model">Modelo de Gemini</label>
+    <input id="model" name="model" value="{{ persona.model }}" required>
+
+    <div class="ai-actions">
+      <button type="submit" name="action" value="save">Guardar identidad</button>
+    </div>
+
+    <fieldset class="instrument-group ai-test">
+      <legend>Probar sin guardar</legend>
+      <textarea name="test_prompt" rows="3" placeholder="Hola, ¿quién eres?">{{ test_prompt }}</textarea>
+      <div class="ai-actions">
+        <button type="submit" name="action" value="test" class="ai-secondary">Probar</button>
+      </div>
+      {% if test_answer %}<pre class="ai-answer">{{ test_answer }}</pre>{% endif %}
+    </fieldset>
+  </form>
+</div>
+{% endblock %}
