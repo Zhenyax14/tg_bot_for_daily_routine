@@ -210,8 +210,9 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("holidays", holidays_cmd))
     if answer_mention is not None:
         application.add_handler(MessageHandler(
-            filters.Chat(chat_id=int(settings.chat_id)) & filters.TEXT & ~filters.COMMAND
-            & (filters.Entity("mention") | filters.REPLY),
+            filters.Chat(chat_id=int(settings.chat_id)) & ~filters.COMMAND
+            & (filters.TEXT | filters.PHOTO | filters.Document.IMAGE)
+            & (filters.Entity("mention") | filters.CaptionEntity("mention") | filters.REPLY),
             AiMentionHandler(answer_mention, ConversationMemory()),
         ))
     return application

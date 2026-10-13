@@ -17,6 +17,7 @@ Presentacion pura, sin logica de dominio.
 """
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 from aiohttp import web
@@ -32,6 +33,11 @@ from application.services.uptime_service import UptimeService
 from application.use_cases.answer_mention import AnswerMention
 from domain.value_objects.ai_persona import MAX_SYSTEM_INSTRUCTION_LENGTH, AiPersona
 from domain.value_objects.chat_turn import ChatTurn
+from domain.value_objects.image_attachment import (
+    MAX_IMAGE_BYTES,
+    SUPPORTED_IMAGE_TYPES,
+    ImageAttachment,
+)
 from domain.value_objects.municipality import Municipality
 from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.web.session_store import SessionStore
@@ -120,6 +126,7 @@ def _ai_context(
     message_class: str = "",
     test_prompt: str = "",
     test_answer: str = "",
+    test_image_url: str = "",
 ) -> dict:
     return {
         "active": "ai",
@@ -132,6 +139,9 @@ def _ai_context(
         "max_length": MAX_SYSTEM_INSTRUCTION_LENGTH,
         "test_prompt": test_prompt,
         "test_answer": test_answer,
+        "test_image_url": test_image_url,
+        "image_accept": ",".join(sorted(SUPPORTED_IMAGE_TYPES)),
+        "max_image_mb": MAX_IMAGE_BYTES // (1024 * 1024),
     }
 
 
@@ -183,7 +193,11 @@ def build_admin_app(
 ) -> web.Application:
     sessions = SessionStore()
     renderer = renderer or ViewRenderer()
-    app = web.Application(middlewares=[_auth_middleware(user_service, sessions)])
+    # client_max_size: el formulario de prueba de IA admite subir una imagen.
+    app = web.Application(
+        middlewares=[_auth_middleware(user_service, sessions)],
+        client_max_size=MAX_IMAGE_BYTES + 1024 * 1024,
+    )
 
     def html_response(template: str, **context) -> web.Response:
         return web.Response(text=renderer.render(template, **context), content_type="text/html")
@@ -297,11 +311,16 @@ def build_admin_app(
             return (), f"No se pudo obtener la lista de modelos ({exc}). Solo se muestra el guardado."
 
     async def render_ai(request: web.Request, persona: AiPersona, message: str = "",
-                        message_class: str = "", test_prompt: str = "", test_answer: str = "") -> web.Response:
+                        message_class: str = "", test_prompt: str = "", test_answer: str = "",
+                        test_image: ImageAttachment | None = None) -> web.Response:
         models, catalog_error = await available_models()
+        test_image_url = (
+            f"data:{test_image.mime_type};base64,{base64.b64encode(test_image.data).decode('ascii')}"
+            if test_image else ""
+        )
         return html_response("admin/ai.html", **_ai_context(
             persona, answer_mention is not None, _model_groups(models, persona.model), catalog_error,
-            message, message_class, test_prompt, test_answer,
+            message, message_class, test_prompt, test_answer, test_image_url,
         ), **_user_context(request))
 
     async def ai_get(request: web.Request) -> web.Response:
@@ -330,15 +349,29 @@ def build_admin_app(
 
         # Probar: usa lo escrito en el formulario SIN guardarlo.
         test_prompt = str(data.get("test_prompt", "")).strip()
+        upload = data.get("test_image")
+        test_image: ImageAttachment | None = None
+        if isinstance(upload, web.FileField):
+            raw = upload.file.read()
+            if raw:
+                try:
+                    test_image = ImageAttachment(upload.content_type, raw)
+                except ValueError:
+                    return await render_ai(request, persona, (
+                        f"Imagen no válida: usa JPG, PNG, WEBP o HEIC de hasta {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
+                    ), "err", test_prompt)
         if answer_mention is None:
             return await render_ai(request, persona, "Falta GEMINI_API_KEY en el .env.", "err", test_prompt)
-        if not test_prompt:
-            return await render_ai(request, persona, "Escribe un mensaje de prueba.", "err")
+        if not test_prompt and test_image is None:
+            return await render_ai(request, persona, "Escribe un mensaje de prueba o adjunta una imagen.", "err")
+        turn = ChatTurn("user", test_prompt, (test_image,) if test_image else ())
         try:
-            answer = await answer_mention.execute([ChatTurn("user", test_prompt)], persona)
+            answer = await answer_mention.execute([turn], persona)
         except LanguageModelError as exc:
-            return await render_ai(request, persona, str(exc), "err", test_prompt)
-        return await render_ai(request, persona, "Prueba realizada (sin guardar).", "ok", test_prompt, answer)
+            return await render_ai(request, persona, str(exc), "err", test_prompt, test_image=test_image)
+        return await render_ai(
+            request, persona, "Prueba realizada (sin guardar).", "ok", test_prompt, answer, test_image
+        )
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")

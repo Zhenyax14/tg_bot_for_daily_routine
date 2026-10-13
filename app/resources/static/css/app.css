@@ -423,12 +423,12 @@ body{min-height:100vh;display:flex;flex-direction:column}
 .ai-label{display:block;margin:1.2rem 0 .5rem;font-size:.85rem;font-weight:600;color:var(--ink-soft)}
 .ai-toggle{display:flex;align-items:center;gap:.55rem;font-size:.9rem;cursor:pointer}
 .ai-toggle input{width:1rem;height:1rem;accent-color:var(--yellow-deep)}
-.ai-card textarea,.ai-card input:not([type=checkbox]){
+.ai-card textarea,.ai-card input:not([type=checkbox]):not([type=file]){
   display:block;width:100%;padding:.7rem .85rem;font:inherit;font-size:.92rem;color:var(--ink);
   background:#fff;border:1px solid var(--line);border-radius:.45rem;outline:none;resize:vertical;
   transition:border-color .15s ease,box-shadow .15s ease;
 }
-.ai-card input:not([type=checkbox]){height:2.8rem;max-width:30rem}
+.ai-card input:not([type=checkbox]):not([type=file]){height:2.8rem;max-width:30rem}
 
 /* desplegable de modelos: select nativo sin apariencia del SO + chevron propio */
 .ai-select{position:relative;max-width:30rem}
@@ -454,9 +454,23 @@ body{min-height:100vh;display:flex;flex-direction:column}
 .ai-note svg{width:.95rem;height:.95rem;flex-shrink:0;margin-top:.1rem;stroke:currentColor}
 .ai-note strong{color:var(--ink-soft);font-weight:600}
 .ai-note.err{color:#a5281b}
-.ai-card textarea:focus,.ai-card input:not([type=checkbox]):focus{border-color:var(--yellow-deep);box-shadow:0 0 0 3px rgba(244,180,0,.16)}
+.ai-card textarea:focus,.ai-card input:not([type=checkbox]):not([type=file]):focus{border-color:var(--yellow-deep);box-shadow:0 0 0 3px rgba(244,180,0,.16)}
 .ai-card .ai-actions{margin-top:1.4rem}
 .ai-test{margin-top:2rem;padding-top:1.4rem;border-top:1px solid var(--line)}
 .ai-card button.ai-secondary{background:transparent;border:1px solid var(--line)}
 .ai-card button.ai-secondary:hover{border-color:var(--yellow-deep);background:var(--paper-dim)}
 .ai-answer{margin-top:1rem;padding:1rem;background:var(--paper-dim);border:1px solid var(--line);border-radius:.5rem;white-space:pre-wrap;font:inherit;font-size:.9rem;line-height:1.5}
+
+/* adjuntar imagen en "Probar": input file oculto tras una caja punteada */
+.ai-file{
+  display:flex;align-items:center;gap:.6rem;margin-top:.7rem;padding:.75rem .95rem;
+  border:1px dashed #d5cdbc;border-radius:.55rem;background:var(--paper-dim);
+  color:var(--mute);font-size:.85rem;cursor:pointer;
+  transition:border-color .15s ease,background .15s ease,color .15s ease;
+}
+.ai-file:hover,.ai-file:focus-within{border-color:var(--yellow-deep);background:#fff;color:var(--ink-soft)}
+.ai-file.has-file{border-style:solid;border-color:var(--yellow);background:#fff;color:var(--ink)}
+.ai-file input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.ai-file svg{width:1.2rem;height:1.2rem;flex-shrink:0;stroke:currentColor}
+.ai-file-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-test-image{display:block;max-width:100%;max-height:22rem;margin-top:1rem;border:1px solid var(--line);border-radius:.5rem}

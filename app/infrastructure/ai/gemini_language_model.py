@@ -7,6 +7,7 @@ deprecados y la API los ignora (y en futuras generaciones dara error).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from typing import Sequence
 
@@ -38,9 +39,7 @@ class GeminiLanguageModel:
         self._retry_delays = retry_delays
 
     async def generate(self, persona: AiPersona, conversation: Sequence[ChatTurn]) -> str:
-        body: dict = {
-            "contents": [{"role": turn.role, "parts": [{"text": turn.text}]} for turn in conversation]
-        }
+        body: dict = {"contents": [_content(turn) for turn in conversation]}
         if persona.system_instruction.strip():
             body["system_instruction"] = {"parts": [{"text": persona.system_instruction}]}
 
@@ -65,6 +64,18 @@ class GeminiLanguageModel:
             logger.warning("Gemini: HTTP %s, reintento en %.0fs", response.status_code, delay)
             await asyncio.sleep(delay)
         raise AssertionError("unreachable")
+
+
+def _content(turn: ChatTurn) -> dict:
+    # Imagenes primero y despues el texto: es el orden que recomienda Google
+    # para preguntas sobre una imagen.
+    parts: list[dict] = [
+        {"inline_data": {"mime_type": image.mime_type, "data": base64.b64encode(image.data).decode("ascii")}}
+        for image in turn.images
+    ]
+    if turn.text:
+        parts.append({"text": turn.text})
+    return {"role": turn.role, "parts": parts}
 
 
 def _error_message(response: httpx.Response) -> str:

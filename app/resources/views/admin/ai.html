@@ -8,7 +8,7 @@
   <div class="msg err">Falta <code>GEMINI_API_KEY</code> en el <code>.env</code>: el bot no responderá a menciones hasta que la añadas y reinicies.</div>
   {% endif %}
   <p class="alerts-hint">El bot responde en el hilo <strong>General</strong> cuando alguien lo menciona (<code>@nombrebot pregunta…</code>) o responde a uno de sus mensajes. Aquí defines su identidad: quién es, cómo habla y qué sabe. Se guarda en la base de datos y se aplica al instante, sin reiniciar.</p>
-  <form method="post" action="/admin/ai">
+  <form method="post" action="/admin/ai" enctype="multipart/form-data">
     <label class="ai-toggle">
       <input type="checkbox" name="enabled" {% if persona.enabled %}checked{% endif %}>
       <span>Responder a menciones en Telegram</span>
@@ -43,10 +43,16 @@
 
     <fieldset class="instrument-group ai-test">
       <legend>Probar sin guardar</legend>
-      <textarea name="test_prompt" rows="3" placeholder="Hola, ¿quién eres?">{{ test_prompt }}</textarea>
+      <textarea name="test_prompt" rows="3" placeholder="Hola, ¿quién eres? · o adjunta un gráfico y pregunta qué tendencia ves">{{ test_prompt }}</textarea>
+      <label class="ai-file">
+        <input type="file" name="test_image" accept="{{ image_accept }}">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><circle cx="9" cy="10" r="2" stroke-width="2"/><path d="M21 16l-5-5-9 9" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="ai-file-name" data-empty="Adjuntar imagen (opcional · JPG, PNG, WEBP, HEIC · máx. {{ max_image_mb }} MB)">Adjuntar imagen (opcional · JPG, PNG, WEBP, HEIC · máx. {{ max_image_mb }} MB)</span>
+      </label>
       <div class="ai-actions">
         <button type="submit" name="action" value="test" class="ai-secondary">Probar</button>
       </div>
+      {% if test_image_url %}<img class="ai-test-image" src="{{ test_image_url }}" alt="Imagen de prueba">{% endif %}
       {% if test_answer %}<pre class="ai-answer">{{ test_answer }}</pre>{% endif %}
     </fieldset>
   </form>
