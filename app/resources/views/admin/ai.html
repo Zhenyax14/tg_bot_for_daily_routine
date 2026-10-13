@@ -53,7 +53,10 @@
         <button type="submit" name="action" value="test" class="ai-secondary">Probar</button>
       </div>
       {% if test_image_url %}<img class="ai-test-image" src="{{ test_image_url }}" alt="Imagen de prueba">{% endif %}
-      {% if test_answer %}<pre class="ai-answer">{{ test_answer }}</pre>{% endif %}
+      {% if test_answer_html %}
+      <p class="ai-preview-label">Vista previa como en Telegram</p>
+      <div class="ai-answer">{{ test_answer_html|safe }}</div>
+      {% endif %}
     </fieldset>
   </form>
 </div>

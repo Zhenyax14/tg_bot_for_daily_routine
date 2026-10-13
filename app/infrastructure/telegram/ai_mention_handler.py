@@ -22,8 +22,8 @@ from __future__ import annotations
 import logging
 
 from telegram import Message, Update
-from telegram.constants import ChatAction, MessageEntityType, MessageLimit
-from telegram.error import TelegramError
+from telegram.constants import ChatAction, MessageEntityType, ParseMode
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, filters
 
 from application.ports.language_model import LanguageModelError
@@ -38,6 +38,7 @@ from domain.value_objects.image_attachment import (
     UnsupportedImageType,
 )
 from infrastructure.telegram.album_collector import AlbumCollector
+from infrastructure.telegram.markdown_to_html import markdown_to_telegram_html, split_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,9 @@ _ALBUM_TOO_LARGE_REPLY = (
     "Отправьте меньше файлов или сжатые фото."
 )
 _TELEGRAM_PHOTO_MIME = "image/jpeg"  # Telegram recomprime toda "foto" a JPEG
+# Se trocea el Markdown antes de convertirlo; margen bajo el limite de 4096
+# de Telegram porque las tablas alineadas pueden crecer al renderizarse.
+_CHUNK_CHARS = 3500
 
 
 class _ImageError(Exception):
@@ -142,8 +146,8 @@ class AiMentionHandler:
             len(conversation), sum(len(t.images) for t in conversation), len(answer),
         )
         thread = [*conversation, ChatTurn("model", answer)]
-        for chunk in _split(answer, MessageLimit.MAX_TEXT_LENGTH):
-            sent = await lead.reply_text(chunk)
+        for chunk in split_markdown(answer, _CHUNK_CHARS):
+            sent = await _reply_formatted(lead, chunk)
             self._memory.remember(sent.chat_id, sent.message_id, thread)
 
     async def _conversation(
@@ -241,14 +245,12 @@ def _strip_mention(text: str, bot_username: str) -> str:
     return text.strip(" \n,:")
 
 
-def _split(text: str, limit: int) -> list[str]:
-    chunks: list[str] = []
-    while len(text) > limit:
-        cut = text.rfind("\n", 0, limit)
-        if cut <= 0:
-            cut = limit
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip("\n")
-    if text:
-        chunks.append(text)
-    return chunks
+async def _reply_formatted(message: Message, markdown: str) -> Message:
+    """Envia el Markdown del modelo convertido al HTML de Telegram; si
+    Telegram no logra interpretarlo, reenvia el mismo trozo como texto plano
+    para no perder nunca la respuesta."""
+    try:
+        return await message.reply_text(markdown_to_telegram_html(markdown), parse_mode=ParseMode.HTML)
+    except BadRequest as exc:
+        logger.warning("IA: HTML rechazado por Telegram (%s), se envia como texto plano", exc)
+        return await message.reply_text(markdown)

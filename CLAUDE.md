@@ -530,12 +530,25 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   `infrastructure/persistence/postgres_ai_persona_repository.py`,
   `infrastructure/telegram/ai_mention_handler.py`,
   `infrastructure/telegram/album_collector.py`,
+  `infrastructure/telegram/markdown_to_html.py`,
   `resources/views/admin/ai.html`.
 - `build_admin_app(...)` gained `ai_personas`, `answer_mention` and
   `model_catalog` (6th–8th, before `renderer`); the last two are `None` when
   `GEMINI_API_KEY` is empty.
-- Not built (yet): per-user rate limit; Markdown → Telegram formatting
-  (answers are sent as plain text, so `**bold**` shows literal asterisks).
+- **Formatting:** Gemini answers in Markdown; Telegram only understands its
+  HTML subset. `infrastructure/telegram/markdown_to_html.py` converts:
+  `#` headings → `<b>`, `**`/`__` → `<b>`, `*`/`_` → `<i>` (not inside
+  words, so `snake_case` survives), `~~` → `<s>`, inline/fenced code →
+  `<code>`/`<pre>`, `>` → `<blockquote>`, lists → `•`, `---` → a rule line,
+  **tables → aligned monospace `<pre>`** (numeric columns right-aligned; key
+  for analytics). Links only for http(s)/tg/mailto (the same HTML is shown
+  with `|safe` in the panel preview). Lines whose markers cross
+  (`**a *b** c*`) fall back to plain escaped text so the HTML is always
+  balanced. `split_markdown()` chunks the *Markdown* (3500 chars) before
+  converting, closing/reopening ``` fences across chunks. If Telegram still
+  rejects a chunk (`BadRequest`), it's resent as plain text. The panel's
+  "Probar" shows a "Vista previa como en Telegram".
+- Not built (yet): per-user rate limit.
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)
 

@@ -40,6 +40,7 @@ from domain.value_objects.image_attachment import (
 )
 from domain.value_objects.municipality import Municipality
 from infrastructure.config.instruments import INSTRUMENTS
+from infrastructure.telegram.markdown_to_html import markdown_to_telegram_html
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
 
@@ -138,7 +139,10 @@ def _ai_context(
         "catalog_error": catalog_error,
         "max_length": MAX_SYSTEM_INSTRUCTION_LENGTH,
         "test_prompt": test_prompt,
-        "test_answer": test_answer,
+        # Vista previa tal como se vera en Telegram. Es seguro marcarla |safe:
+        # el conversor escapa todo el texto y solo emite etiquetas fijas con
+        # enlaces http(s)/tg/mailto.
+        "test_answer_html": markdown_to_telegram_html(test_answer) if test_answer else "",
         "test_image_url": test_image_url,
         "image_accept": ",".join(sorted(SUPPORTED_IMAGE_TYPES)),
         "max_image_mb": MAX_IMAGE_BYTES // (1024 * 1024),
