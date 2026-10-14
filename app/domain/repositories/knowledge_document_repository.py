@@ -1,0 +1,16 @@
+"""Interfaz del repositorio de documentos de la base de conocimiento."""
+from __future__ import annotations
+
+from typing import Protocol
+
+from domain.entities.knowledge_document import KnowledgeDocument
+
+
+class KnowledgeDocumentRepository(Protocol):
+    async def list_all(self) -> list[KnowledgeDocument]: ...
+    async def add(
+        self, filename: str, content_type: str, content: bytes, text: str, enabled: bool
+    ) -> KnowledgeDocument: ...
+    async def original(self, document_id: int) -> tuple[str, str, bytes] | None: ...
+    async def set_enabled(self, document_id: int, enabled: bool) -> None: ...
+    async def delete(self, document_id: int) -> None: ...

@@ -97,14 +97,16 @@ Conventional Commits, using the **subdomain** as scope (not the layer), e.g.
 
 ## 3. Deployment / Docker
 
-- Compose file: `bot2/docker/docker-compose.yaml`; `.env` at **repo root**
+- Compose file: `bot2/docker/docker-compose.yaml`; `docker/.env` at **repo root**
   (`../.env` from the compose file). Services: `bot` + `postgres:17`, volume
   `pgdata`.
 - Web panel is published on **host 8081** → container 8080
   (`"8081:8080"`; internal `WEB_PORT` stays 8080). Panel at
   `http://192.168.1.204:8081`.
 - **`requirements.txt` must contain:** `python-telegram-bot`, `apscheduler`,
-  `httpx`, `tzdata`, `aiohttp`, `asyncpg`, `bcrypt`, `jinja2`. (Each missing one
+  `httpx`, `tzdata`, `aiohttp`, `asyncpg`, `bcrypt`, `jinja2`, `pypdf` (PDF
+  text for the AI knowledge base). **The file is UTF-16 LE with CRLF** — edit
+  it with an encoding-aware tool, not `echo >>`. (Each missing one
   caused a `ModuleNotFoundError` cascade in the past.)
 
 Common commands:
@@ -119,8 +121,10 @@ docker compose -f docker/docker-compose.yaml logs -f
 DRY_RUN=1 docker compose -f docker/docker-compose.yaml run --rm -e DRY_RUN bot
 ```
 
-**Browser cache gotcha:** after editing CSS/views, hard-reload with
-**Ctrl+Shift+R**. A stale cached page once looked completely unstyled while
+**Browser cache:** layouts reference assets via `{{ asset('css/app.css') }}`
+(`ViewRenderer` global → `/static/css/app.css?v=<mtime>`), so a changed file
+gets a new URL and no hard-reload is needed after a deploy. Before that,
+**Ctrl+Shift+R** was required. A stale cached page once looked completely unstyled while
 `curl -i http://localhost:8081/static/css/app.css` returned `200 OK` — always
 `curl` the asset before assuming a backend bug.
 
@@ -152,7 +156,7 @@ All env vars are read and validated **once** at startup; if a required one is
 missing the process exits with code 1 listing all missing vars.
 
 `DATABASE_URL` is **built programmatically** from `POSTGRES_*` components — it is
-**never** stored directly in `.env` (that caused a password desync bug). Single
+**never** stored directly in `docker/.env` (that caused a password desync bug). Single
 source of truth for the DB password is `POSTGRES_PASSWORD`.
 
 Key vars:
@@ -173,6 +177,7 @@ Key vars:
 | `DRY_RUN` | no | `false` | `1/true/yes/on` → ConsoleNotifier, no network |
 | `STARTUP_MESSAGE` | no | `Инициализируюсь...` | sent on every startup |
 | `PRICE_ALERTS_THREAD_ID` | no | `331017` | topic id for price-alert messages, same group as `CHAT_ID` |
+| `GEMINI_API_KEY` | no | empty | Google Gemini key; empty = AI assistant disabled (see §8.8) |
 
 ---
 
@@ -190,6 +195,14 @@ Applied idempotently on every startup (`CREATE TABLE IF NOT EXISTS` +
   instrument is disabled for price alerts. Absence = enabled (the default);
   this way adding/removing instruments from the code catalog never needs a
   migration. See §8.7.
+
+- **`ai_persona`** — single-row table (`id boolean PK DEFAULT true CHECK (id)`,
+  `system_instruction text`, `model text`, `enabled boolean`, `context text`,
+  `updated_at`). The AI assistant's identity + group context, edited from
+  `/admin/ai`. See §8.8.
+- **`ai_documents`** — AI knowledge base: `id serial`, `filename`,
+  `content_type`, `content bytea` (original, for download), `text_content`
+  (extracted once at upload), `size_bytes`, `enabled`, `created_at`.
 
 Passwords are bcrypt (salted, irreversible). Never stored in cleartext.
 
@@ -452,6 +465,121 @@ stored in Postgres and editable from `/admin/alerts` without restarting the bot.
   gate, category grouping renders, POST persists exactly the checked set,
   a follow-up GET reflects it, and `CheckPriceMovements` skips fetching
   disabled symbols entirely (not just skips alerting on them).
+
+### 8.8 AI assistant (Gemini) — built, pending live test
+
+In the group's **General** topic (messages with `is_topic_message == False`,
+same `CHAT_ID`), a message that **@mentions the bot** or **replies to one of
+its messages** is sent as a prompt to Google Gemini; the answer is posted as a
+plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
+(bots still receive mentions and replies to themselves).
+
+- **Identity** = Gemini `system_instruction` + model name + on/off switch,
+  stored in `ai_persona` (§5) and edited at `/admin/ai` (sidebar "IA"). It's
+  cached in memory (`AiPersonaService`, `LocationService` pattern), so changes
+  apply to the next mention without restarting.
+- **Panel layout (`/admin/ai`):** header (hint + "Guardar cambios") over a
+  fixed 2-column grid of tiles — Identidad | Contexto del grupo, then Modelo y
+  estado (on/off switch + model dropdown) | Documentos; one column under
+  1000 px. The settings fields live in different tiles but all belong to one
+  empty `<form id="ai-settings">` via the `form=` attribute, so the Documentos
+  tile can hold its own forms without nesting. The old "Probar" test box was
+  **removed at the user's request** (2026-10-14) — test by mentioning the bot.
+- **Conversation threads:** replying to a bot message sends Gemini a
+  turn-based conversation (bot = `model`, people = `user`, each user turn
+  prefixed with `[Сообщение от <name>]`). The full thread behind each bot
+  reply is kept in memory (`ConversationMemory`: 500 threads × 20 turns, keyed
+  by `(chat_id, message_id)`, lost on restart → falls back to the quoted bot
+  message alone). **Never** pass the bot's own message as quoted third-party
+  text: the model answers it and "talks to itself" (bug fixed 2026-10-14).
+  A mention that replies to a *human* message includes that message as quoted
+  context in a single `user` turn.
+- Gemini REST via `httpx` (no SDK): `POST v1beta/models/{model}:generateContent`,
+  header `x-goog-api-key`. Default model `gemini-3.1-flash-lite` (oldest stable model still open to new keys; `gemini-2.5-flash` returns 404 "no longer available to new users", newer flash models hit 503 overloads). **No
+  temperature/top_p/top_k sent** — deprecated from Gemini 3.6 Flash on.
+  Parts with `thought: true` are dropped.
+- **Images (vision):** photos and uncompressed image files (`image/jpeg|png|
+  webp|heic|heif`, ≤ 14 MB) are sent to Gemini as `inline_data` parts (images
+  first, then text). Covered: photo whose **caption** @mentions the bot
+  (`filters.CaptionEntity("mention")`); a text mention **replying to someone's
+  photo** (quoted image attached); a photo **replying to a bot message**.
+  Images stay in the thread memory for follow-ups; `ConversationMemory` also
+  caps total image bytes (64 MB, evicts oldest threads). Telegram "photos" are
+  always JPEG; the largest `PhotoSize` is downloaded. GIF/other → Russian
+  "format not supported" reply; > 15 MB → "too large" (checked on
+  `file_size` before downloading). **Albums:** Telegram sends each photo as
+  its own message sharing `media_group_id` (only one carries the caption).
+  `ALBUM_IMAGES` lets every album image through the filter (needs privacy
+  mode OFF, which mentions already require); `AlbumCollector` buffers them
+  and, after 2 s without a new piece, answers **once**, replying to the
+  captioned message, with all images in order. Albums with no mention and no
+  reply to the bot are dropped without downloading.
+- **Image budget:** a Gemini request allows ~20 MB and images go as base64
+  (+33 %), so 14 MB raw is the cap per image *and* per request
+  (`MAX_REQUEST_IMAGE_BYTES`). An album over it gets a Russian "too large"
+  reply. For long threads, `AnswerMention` runs `fit_images()`: keeps the
+  newest images, drops older ones and tags those turns with
+  `[изображения из этого сообщения больше недоступны]`. Before this, the handler
+  filtered `filters.TEXT` only and the model *claimed* it could see photos it
+  never received.
+- **Context + knowledge base:** besides the identity, `/admin/ai` has a
+  "Contexto del grupo" textarea (`AiPersona.context`, ≤ 50k chars) and a
+  "Documentos" card (upload several at once, toggle Activo/Inactivo, download,
+  delete with confirm). `FileTextExtractor` extracts text at upload: text/
+  config formats (UTF-8 → cp1251 → latin-1), HTML/XML (tags stripped), DOCX
+  (stdlib zip+XML), PDF (`pypdf`; scanned PDFs have no text → rejected).
+  `KnowledgeBase` (cached like `AiPersonaService`) caps **enabled** text at
+  400k chars (~100k tokens) because it's sent with **every** question: an
+  upload that doesn't fit is stored *disabled*, and enabling past the cap is
+  refused. `build_system_instruction()` = identity + `# Context` +
+  `# Knowledge base` with each doc in `<document name="…">` (reference data,
+  "say so instead of inventing"). The `LanguageModel` port now takes
+  `(model, system_instruction, conversation)`; composing it is application
+  logic. Downloads are always `application/octet-stream` + attachment +
+  `nosniff` (user-uploaded content). Verified live: answers from context and
+  a DOCX, and says it doesn't know for facts absent from both.
+- **Model dropdown:** `/admin/ai` lists the models the key can use
+  (`ModelCatalog` port → `GeminiModelCatalog`, `GET v1beta/models`, cached 1 h,
+  only `gemini*` with `generateContent`, minus tts/audio/transcribe/image/
+  nano-banana/embedding/live). Grouped as Estables / Alias (`-latest`) /
+  Preview. The saved model always shows even if Google stops listing it; if
+  the listing fails, only the saved one is shown and saving isn't blocked.
+  Listed ≠ usable: `gemini-2.5-flash` is listed but 404s for new keys.
+- Files: `domain/value_objects/ai_persona.py`,
+  `domain/repositories/ai_persona_repository.py`,
+  `domain/value_objects/chat_turn.py`, `domain/value_objects/image_attachment.py`,
+  `application/ports/language_model.py` (`LanguageModel`, `LanguageModelError`),
+  `application/services/conversation_memory.py`,
+  `application/ports/model_catalog.py`, `infrastructure/ai/gemini_model_catalog.py`,
+  `domain/entities/knowledge_document.py`,
+  `domain/repositories/knowledge_document_repository.py`,
+  `application/ports/document_text_extractor.py`,
+  `application/services/knowledge_base.py`, `application/services/system_prompt.py`,
+  `infrastructure/documents/file_text_extractor.py`,
+  `infrastructure/persistence/postgres_knowledge_document_repository.py`,
+  `application/services/ai_persona_service.py`,
+  `application/use_cases/answer_mention.py`,
+  `infrastructure/ai/gemini_language_model.py`,
+  `infrastructure/persistence/postgres_ai_persona_repository.py`,
+  `infrastructure/telegram/ai_mention_handler.py`,
+  `infrastructure/telegram/album_collector.py`,
+  `infrastructure/telegram/markdown_to_html.py`,
+  `resources/views/admin/ai.html`.
+- `build_admin_app(...)` gained `ai_personas`, `answer_mention`,
+  `model_catalog` and `knowledge` (6th–9th, before `renderer`);
+  `answer_mention`/`model_catalog` are `None` when `GEMINI_API_KEY` is empty.
+- **Formatting:** Gemini answers in Markdown; Telegram only understands its
+  HTML subset. `infrastructure/telegram/markdown_to_html.py` converts:
+  `#` headings → `<b>`, `**`/`__` → `<b>`, `*`/`_` → `<i>` (not inside
+  words, so `snake_case` survives), `~~` → `<s>`, inline/fenced code →
+  `<code>`/`<pre>`, `>` → `<blockquote>`, lists → `•`, `---` → a rule line,
+  **tables → aligned monospace `<pre>`** (numeric columns right-aligned; key
+  for analytics). Links only for http(s)/tg/mailto. Lines whose markers cross
+  (`**a *b** c*`) fall back to plain escaped text so the HTML is always
+  balanced. `split_markdown()` chunks the *Markdown* (3500 chars) before
+  converting, closing/reopening ``` fences across chunks. If Telegram still
+  rejects a chunk (`BadRequest`), it's resent as plain text.
+- Not built (yet): per-user rate limit.
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)
 

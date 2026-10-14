@@ -8,7 +8,7 @@ __pycache__/
 *.py[cod]
 
 # Environment variables file
-.env
+docker/.env
 .env.*
 !.env.example
 !**/.env.example

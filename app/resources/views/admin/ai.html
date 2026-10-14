@@ -1,0 +1,132 @@
+{% extends "admin/layout.html" %}
+{% block title %}IA · Panel Bot{% endblock %}
+{% block heading %}Asistente IA{% endblock %}
+{% block content %}
+{# Formulario de ajustes vacio: los campos de las tarjetas se asocian a el con
+   form="ai-settings". Asi la tarjeta de documentos (con sus propios forms)
+   puede vivir en la misma rejilla sin anidar formularios. #}
+<form id="ai-settings" method="post" action="/admin/ai"></form>
+
+<div class="ai-page">
+  <header class="ai-head">
+    <p>El bot responde en el hilo <strong>General</strong> cuando alguien lo menciona (<code>@nombrebot pregunta…</code>) o responde a uno de sus mensajes. Los cambios se aplican al instante, sin reiniciar.</p>
+    <button type="submit" form="ai-settings" class="ai-save">Guardar cambios</button>
+  </header>
+
+  {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
+  {% if not available %}
+  <div class="msg err">Falta <code>GEMINI_API_KEY</code> en el <code>.env</code>: el bot no responderá a menciones hasta que la añadas y reinicies.</div>
+  {% endif %}
+
+  <div class="ai-grid">
+    <section class="ai-tile ai-tile-text">
+      <div class="ai-tile-head">
+        <span class="ai-tile-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="4" stroke-width="2"/><path d="M4 21a8 8 0 0116 0" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <div>
+          <h2>Identidad</h2>
+          <p>Quién es y cómo habla.</p>
+        </div>
+      </div>
+      <textarea form="ai-settings" id="system_instruction" name="system_instruction" rows="9" maxlength="{{ max_length }}"
+        aria-label="Identidad (instrucciones de sistema)"
+        placeholder="Eres «Bot», el asistente del grupo. Respondes siempre en ruso, con tono cercano y breve…">{{ persona.system_instruction }}</textarea>
+    </section>
+
+    <section class="ai-tile ai-tile-text">
+      <div class="ai-tile-head">
+        <span class="ai-tile-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3" stroke-width="2"/><circle cx="17" cy="9" r="2.5" stroke-width="2"/><path d="M3 20a6 6 0 0112 0M15 20a5 5 0 016-4.9" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <div>
+          <h2>Contexto del grupo</h2>
+          <p>Datos que debe saber: quiénes sois, hilos, quién es quién.</p>
+        </div>
+      </div>
+      <textarea form="ai-settings" id="context" name="context" rows="9" maxlength="{{ max_context_length }}"
+        aria-label="Contexto del grupo"
+        placeholder="Quiénes somos, qué grupos y temas hay, quién es quién, cómo tenemos configurado el bot, normas…">{{ persona.context }}</textarea>
+    </section>
+
+    <section class="ai-tile">
+      <div class="ai-tile-head">
+        <span class="ai-tile-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" stroke-width="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <div>
+          <h2>Modelo y estado</h2>
+          <p>Qué modelo de Gemini responde.</p>
+        </div>
+      </div>
+
+      <label class="ai-switch">
+        <input form="ai-settings" type="checkbox" name="enabled" {% if persona.enabled %}checked{% endif %}>
+        <span class="ai-switch-track" aria-hidden="true"><span></span></span>
+        <span>Responder a menciones en Telegram</span>
+      </label>
+
+      <label class="ai-label" for="model">Modelo</label>
+      <div class="ai-select">
+        <select form="ai-settings" id="model" name="model" required>
+          {% for group in model_groups %}
+          <optgroup label="{{ group.label }}">
+            {% for model in group.models %}
+            <option value="{{ model.id }}" {% if model.id == persona.model %}selected{% endif %}>{{ model.display_name }} — {{ model.id }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+        <svg class="ai-select-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      {% if catalog_error %}<p class="ai-note err">{{ catalog_error }}</p>{% endif %}
+      <p class="ai-note">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-width="2"/><path d="M12 11v5M12 8h.01" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Lista de Google para tu clave, actualizada cada hora. Algunos modelos antiguos aparecen pero ya no funcionan: si el bot deja de responder tras cambiarlo, vuelve al anterior.</span>
+      </p>
+    </section>
+
+    <section class="ai-tile" id="documents">
+      <div class="ai-tile-head">
+        <span class="ai-tile-icon"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v5h5M9 13h6M9 17h4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <div>
+          <h2>Documentos</h2>
+          <p>Configuraciones, normas, grupos… Referencia en todas las respuestas.</p>
+        </div>
+      </div>
+
+      <div class="ai-budget" title="Se envían en cada pregunta: más tokens = respuestas más lentas y caras">
+        <span class="ai-budget-label">~{{ knowledge_tokens }} / {{ knowledge_max_tokens }} tokens por pregunta</span>
+        <span class="ai-budget-bar"><span style="width: {{ knowledge_percent }}%"{% if knowledge_percent >= 90 %} class="full"{% endif %}></span></span>
+      </div>
+
+      {% if documents %}
+      <ul class="ai-doc-list">
+        {% for doc in documents %}
+        <li class="ai-doc{% if not doc.enabled %} off{% endif %}">
+          <div class="ai-doc-meta">
+            <a class="ai-doc-name" href="/admin/ai/documents/{{ doc.id }}/download" title="Descargar">{{ doc.filename }}</a>
+            <span class="ai-doc-sub">{{ doc.size }} · ~{{ doc.tokens }} tokens · {{ doc.uploaded }}</span>
+          </div>
+          <form method="post" action="/admin/ai/documents/{{ doc.id }}/toggle">
+            <input type="hidden" name="enabled" value="{{ '0' if doc.enabled else '1' }}">
+            <button type="submit" class="ai-chip{% if doc.enabled %} on{% endif %}" title="{{ 'Desactivar' if doc.enabled else 'Activar' }}">{{ 'Activo' if doc.enabled else 'Inactivo' }}</button>
+          </form>
+          <form method="post" action="/admin/ai/documents/{{ doc.id }}/delete" data-confirm="¿Borrar «{{ doc.filename }}»? No se puede deshacer.">
+            <button type="submit" class="ai-icon-btn" aria-label="Borrar {{ doc.filename }}" title="Borrar">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="ai-doc-empty">Aún no hay documentos.</p>
+      {% endif %}
+
+      <form method="post" action="/admin/ai/documents" enctype="multipart/form-data" class="ai-upload">
+        <label class="ai-file">
+          <input type="file" name="documents" accept="{{ document_accept }}" multiple>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="ai-file-name" data-empty="PDF, DOCX, TXT, MD, CSV, JSON… · máx. {{ max_document_mb }} MB">PDF, DOCX, TXT, MD, CSV, JSON… · máx. {{ max_document_mb }} MB</span>
+        </label>
+        <button type="submit" class="ai-upload-btn">Subir</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}

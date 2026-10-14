@@ -22,6 +22,28 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS instrument_disabled (
     symbol text PRIMARY KEY
 );
+
+CREATE TABLE IF NOT EXISTS ai_persona (
+    id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+    system_instruction text NOT NULL DEFAULT '',
+    model              text NOT NULL,
+    enabled            boolean NOT NULL DEFAULT true,
+    updated_at         timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE ai_persona ADD COLUMN IF NOT EXISTS context text NOT NULL DEFAULT '';
+
+-- Base de conocimiento del asistente: el texto se extrae una vez al subir
+-- el fichero; el original se guarda para poder descargarlo desde el panel.
+CREATE TABLE IF NOT EXISTS ai_documents (
+    id           serial PRIMARY KEY,
+    filename     text NOT NULL,
+    content_type text NOT NULL,
+    content      bytea NOT NULL,
+    text_content text NOT NULL,
+    size_bytes   integer NOT NULL,
+    enabled      boolean NOT NULL DEFAULT true,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
 """
 
 

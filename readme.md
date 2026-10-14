@@ -151,7 +151,7 @@ Variables read by `Settings.from_env()`. All are validated at once on startup; i
 | `DRY_RUN` | no | `false` | If `1`/`true`/`yes`/`on`, uses `ConsoleNotifier` and never hits the network |
 | `STARTUP_MESSAGE` | no | `Инициализируюсь...` | Message sent on startup |
 
-Example `.env` in the project root:
+Example `docker/.env` in the project root:
 
 ```
 TELEGRAM_BOT_TOKEN=1234567890:AAF-xxxxxxxxxxxxxxxxxxxxxxxxxxxx

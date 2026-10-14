@@ -4,14 +4,18 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from application.ports.notifier import Notifier
+from application.services.ai_persona_service import AiPersonaService
+from application.services.conversation_memory import ConversationMemory
 from application.services.instrument_settings_service import InstrumentSettingsService
+from application.services.knowledge_base import KnowledgeBase
 from application.services.location_service import LocationService
 from application.services.reference_prices import ReferencePrices
 from application.services.uptime_service import UptimeService
 from application.services.user_service import UserService
+from application.use_cases.answer_mention import AnswerMention
 from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
 from application.use_cases.bootstrap_admin_user import BootstrapAdminUser
 from application.use_cases.check_price_movements import CheckPriceMovements
@@ -25,8 +29,11 @@ from config.settings import Settings
 from domain.services.price_movement_policy import PriceMovementPolicy
 from domain.value_objects.daily_time import DailyTime
 from domain.value_objects.municipality import Municipality
+from infrastructure.ai.gemini_language_model import GeminiLanguageModel
+from infrastructure.ai.gemini_model_catalog import GeminiModelCatalog
 from infrastructure.config.cities import WORLD_CLOCK_CITIES
 from infrastructure.config.instruments import INSTRUMENTS
+from infrastructure.documents.file_text_extractor import FileTextExtractor
 from infrastructure.holidays.country_routing import CountryRoutingHolidayProvider
 from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
@@ -34,8 +41,12 @@ from infrastructure.location.festivos_io_municipality_directory import FestivosI
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
 from infrastructure.persistence.database import Database
+from infrastructure.persistence.postgres_ai_persona_repository import PostgresAiPersonaRepository
 from infrastructure.persistence.postgres_instrument_settings_repository import (
     PostgresInstrumentSettingsRepository,
+)
+from infrastructure.persistence.postgres_knowledge_document_repository import (
+    PostgresKnowledgeDocumentRepository,
 )
 from infrastructure.persistence.postgres_location_repository import PostgresLocationRepository
 from infrastructure.persistence.postgres_user_repository import PostgresUserRepository
@@ -46,6 +57,7 @@ from infrastructure.quotes.routing_quote_provider import RoutingQuoteProvider
 from infrastructure.quotes.yahoo_finance_quote_provider import YahooFinanceQuoteProvider
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
 from infrastructure.security.bcrypt_password_hasher import BcryptPasswordHasher
+from infrastructure.telegram.ai_mention_handler import ALBUM_IMAGES, AiMentionHandler
 from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
 from infrastructure.telegram.holiday_formatting import format_holiday_greeting
@@ -141,6 +153,18 @@ def build_application(settings: Settings) -> Application:
         job=check_price_movements.execute,
     )
 
+    # Asistente IA (Gemini): responde a @menciones en el hilo General. La
+    # identidad (instrucciones + modelo) vive en BBDD y se edita en /admin/ai.
+    ai_personas = AiPersonaService(PostgresAiPersonaRepository(database))
+    knowledge = KnowledgeBase(PostgresKnowledgeDocumentRepository(database), FileTextExtractor())
+    answer_mention: AnswerMention | None = None
+    model_catalog: GeminiModelCatalog | None = None
+    if settings.gemini_api_key:
+        answer_mention = AnswerMention(ai_personas, GeminiLanguageModel(settings.gemini_api_key), knowledge)
+        model_catalog = GeminiModelCatalog(settings.gemini_api_key)
+    else:
+        logger.warning("GEMINI_API_KEY vacia: asistente IA desactivado")
+
     time_cmd = TimeCommand(GetWorldTimes(clock, WORLD_CLOCK_CITIES))
     holidays_cmd = HolidaysCommand(GetUpcomingHolidays(holiday_provider, clock))
 
@@ -148,7 +172,8 @@ def build_application(settings: Settings) -> Application:
     # tabla users, sesion por cookie, busqueda de municipio por nombre.
     municipality_directory = FestivosIoMunicipalityDirectory()
     admin_app = build_admin_app(
-        location, municipality_directory, user_service, uptime_service, instrument_settings
+        location, municipality_directory, user_service, uptime_service, instrument_settings,
+        ai_personas, answer_mention, model_catalog, knowledge,
     )
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 
@@ -157,12 +182,15 @@ def build_application(settings: Settings) -> Application:
         await database.init_schema()
         await location.load()
         await instrument_settings.load()
+        await ai_personas.load()
+        await knowledge.load()
         # ADMIN_USER/ADMIN_PASSWORD siembran el PRIMER usuario admin (solo si
         # la tabla users esta vacia); no vuelven a tocarla despues.
         await bootstrap_admin.execute(
             settings.admin_user, settings.admin_password, settings.admin_role
         )
-        await send_message.execute(settings.startup_message)
+        if settings.startup_message.strip():
+            await send_message.execute(settings.startup_message)
         await send_price_alert.execute("✅ Система ценовых алертов запущена.")
         uptime_service.mark_started()
         scheduler.start()
@@ -187,6 +215,16 @@ def build_application(settings: Settings) -> Application:
     )
     application.add_handler(CommandHandler("time", time_cmd))
     application.add_handler(CommandHandler("holidays", holidays_cmd))
+    if answer_mention is not None:
+        application.add_handler(MessageHandler(
+            filters.Chat(chat_id=int(settings.chat_id)) & ~filters.COMMAND
+            & (
+                (filters.TEXT | filters.PHOTO | filters.Document.IMAGE)
+                & (filters.Entity("mention") | filters.CaptionEntity("mention") | filters.REPLY)
+                | ALBUM_IMAGES
+            ),
+            AiMentionHandler(answer_mention, ConversationMemory()),
+        ))
     return application
 
 
@@ -195,6 +233,9 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
     )
+    # httpx registra cada URL en INFO, y las de la API de Telegram llevan el
+    # token del bot dentro (/bot<TOKEN>/...): nunca debe acabar en los logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         settings = Settings.from_env()
         application = build_application(settings)

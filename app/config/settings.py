@@ -33,6 +33,7 @@ class Settings:
     admin_user: str
     admin_password: str
     admin_role: str
+    gemini_api_key: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -88,4 +89,6 @@ class Settings:
             admin_user=os.getenv("ADMIN_USER", "admin").strip(),
             admin_password=os.environ["ADMIN_PASSWORD"],
             admin_role=os.getenv("ADMIN_ROLE", "admin").strip(),
+            # Opcional: vacio = el asistente de IA queda desactivado.
+            gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         )
