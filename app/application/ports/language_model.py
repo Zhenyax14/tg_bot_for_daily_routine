@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
-from domain.value_objects.ai_persona import AiPersona
 from domain.value_objects.chat_turn import ChatTurn
 
 
@@ -11,4 +10,4 @@ class LanguageModelError(Exception):
 
 
 class LanguageModel(Protocol):
-    async def generate(self, persona: AiPersona, conversation: Sequence[ChatTurn]) -> str: ...
+    async def generate(self, model: str, system_instruction: str, conversation: Sequence[ChatTurn]) -> str: ...

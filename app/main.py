@@ -10,6 +10,7 @@ from application.ports.notifier import Notifier
 from application.services.ai_persona_service import AiPersonaService
 from application.services.conversation_memory import ConversationMemory
 from application.services.instrument_settings_service import InstrumentSettingsService
+from application.services.knowledge_base import KnowledgeBase
 from application.services.location_service import LocationService
 from application.services.reference_prices import ReferencePrices
 from application.services.uptime_service import UptimeService
@@ -32,6 +33,7 @@ from infrastructure.ai.gemini_language_model import GeminiLanguageModel
 from infrastructure.ai.gemini_model_catalog import GeminiModelCatalog
 from infrastructure.config.cities import WORLD_CLOCK_CITIES
 from infrastructure.config.instruments import INSTRUMENTS
+from infrastructure.documents.file_text_extractor import FileTextExtractor
 from infrastructure.holidays.country_routing import CountryRoutingHolidayProvider
 from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
@@ -42,6 +44,9 @@ from infrastructure.persistence.database import Database
 from infrastructure.persistence.postgres_ai_persona_repository import PostgresAiPersonaRepository
 from infrastructure.persistence.postgres_instrument_settings_repository import (
     PostgresInstrumentSettingsRepository,
+)
+from infrastructure.persistence.postgres_knowledge_document_repository import (
+    PostgresKnowledgeDocumentRepository,
 )
 from infrastructure.persistence.postgres_location_repository import PostgresLocationRepository
 from infrastructure.persistence.postgres_user_repository import PostgresUserRepository
@@ -151,10 +156,11 @@ def build_application(settings: Settings) -> Application:
     # Asistente IA (Gemini): responde a @menciones en el hilo General. La
     # identidad (instrucciones + modelo) vive en BBDD y se edita en /admin/ai.
     ai_personas = AiPersonaService(PostgresAiPersonaRepository(database))
+    knowledge = KnowledgeBase(PostgresKnowledgeDocumentRepository(database), FileTextExtractor())
     answer_mention: AnswerMention | None = None
     model_catalog: GeminiModelCatalog | None = None
     if settings.gemini_api_key:
-        answer_mention = AnswerMention(ai_personas, GeminiLanguageModel(settings.gemini_api_key))
+        answer_mention = AnswerMention(ai_personas, GeminiLanguageModel(settings.gemini_api_key), knowledge)
         model_catalog = GeminiModelCatalog(settings.gemini_api_key)
     else:
         logger.warning("GEMINI_API_KEY vacia: asistente IA desactivado")
@@ -167,7 +173,7 @@ def build_application(settings: Settings) -> Application:
     municipality_directory = FestivosIoMunicipalityDirectory()
     admin_app = build_admin_app(
         location, municipality_directory, user_service, uptime_service, instrument_settings,
-        ai_personas, answer_mention, model_catalog,
+        ai_personas, answer_mention, model_catalog, knowledge,
     )
     admin_server = AdminServer(admin_app, settings.web_host, settings.web_port)
 
@@ -177,6 +183,7 @@ def build_application(settings: Settings) -> Application:
         await location.load()
         await instrument_settings.load()
         await ai_personas.load()
+        await knowledge.load()
         # ADMIN_USER/ADMIN_PASSWORD siembran el PRIMER usuario admin (solo si
         # la tabla users esta vacia); no vuelven a tocarla despues.
         await bootstrap_admin.execute(

@@ -14,7 +14,6 @@ from typing import Sequence
 import httpx
 
 from application.ports.language_model import LanguageModelError
-from domain.value_objects.ai_persona import AiPersona
 from domain.value_objects.chat_turn import ChatTurn
 
 logger = logging.getLogger(__name__)
@@ -38,14 +37,14 @@ class GeminiLanguageModel:
         self._timeout = timeout
         self._retry_delays = retry_delays
 
-    async def generate(self, persona: AiPersona, conversation: Sequence[ChatTurn]) -> str:
+    async def generate(self, model: str, system_instruction: str, conversation: Sequence[ChatTurn]) -> str:
         body: dict = {"contents": [_content(turn) for turn in conversation]}
-        if persona.system_instruction.strip():
-            body["system_instruction"] = {"parts": [{"text": persona.system_instruction}]}
+        if system_instruction.strip():
+            body["system_instruction"] = {"parts": [{"text": system_instruction}]}
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await self._post(client, persona.model, body)
+                response = await self._post(client, model, body)
         except httpx.HTTPError as exc:
             raise LanguageModelError(f"Gemini: fallo de red: {exc}") from exc
 

@@ -1,5 +1,5 @@
 """Caso de uso: responder a una mencion del bot con el modelo de lenguaje,
-usando la identidad configurada en el panel.
+usando la identidad, el contexto y los documentos configurados en el panel.
 
 Antes de llamar al modelo ajusta las imagenes al presupuesto por peticion:
 si el hilo acumula demasiadas (albumes, seguimientos con varios graficos),
@@ -12,6 +12,8 @@ from typing import Sequence
 
 from application.ports.language_model import LanguageModel
 from application.services.ai_persona_service import AiPersonaService
+from application.services.knowledge_base import KnowledgeBase
+from application.services.system_prompt import build_system_instruction
 from domain.value_objects.ai_persona import AiPersona
 from domain.value_objects.chat_turn import ChatTurn
 from domain.value_objects.image_attachment import MAX_REQUEST_IMAGE_BYTES
@@ -24,10 +26,12 @@ class AnswerMention:
         self,
         personas: AiPersonaService,
         language_model: LanguageModel,
+        knowledge: KnowledgeBase,
         max_image_bytes: int = MAX_REQUEST_IMAGE_BYTES,
     ) -> None:
         self._personas = personas
         self._language_model = language_model
+        self._knowledge = knowledge
         self._max_image_bytes = max_image_bytes
 
     @property
@@ -37,8 +41,10 @@ class AnswerMention:
     async def execute(self, conversation: Sequence[ChatTurn], persona: AiPersona | None = None) -> str:
         """`conversation` acaba en el turno del usuario a responder. `persona`
         permite probar una identidad aun no guardada (panel)."""
+        persona = persona or self._personas.current
+        system_instruction = build_system_instruction(persona, self._knowledge.enabled_documents())
         fitted = fit_images(conversation, self._max_image_bytes)
-        return await self._language_model.generate(persona or self._personas.current, fitted)
+        return await self._language_model.generate(persona.model, system_instruction, fitted)
 
 
 def fit_images(conversation: Sequence[ChatTurn], max_bytes: int) -> list[ChatTurn]:

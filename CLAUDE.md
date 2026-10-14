@@ -104,7 +104,9 @@ Conventional Commits, using the **subdomain** as scope (not the layer), e.g.
   (`"8081:8080"`; internal `WEB_PORT` stays 8080). Panel at
   `http://192.168.1.204:8081`.
 - **`requirements.txt` must contain:** `python-telegram-bot`, `apscheduler`,
-  `httpx`, `tzdata`, `aiohttp`, `asyncpg`, `bcrypt`, `jinja2`. (Each missing one
+  `httpx`, `tzdata`, `aiohttp`, `asyncpg`, `bcrypt`, `jinja2`, `pypdf` (PDF
+  text for the AI knowledge base). **The file is UTF-16 LE with CRLF** — edit
+  it with an encoding-aware tool, not `echo >>`. (Each missing one
   caused a `ModuleNotFoundError` cascade in the past.)
 
 Common commands:
@@ -195,8 +197,12 @@ Applied idempotently on every startup (`CREATE TABLE IF NOT EXISTS` +
   migration. See §8.7.
 
 - **`ai_persona`** — single-row table (`id boolean PK DEFAULT true CHECK (id)`,
-  `system_instruction text`, `model text`, `enabled boolean`, `updated_at`).
-  The AI assistant's identity, edited from `/admin/ai`. See §8.8.
+  `system_instruction text`, `model text`, `enabled boolean`, `context text`,
+  `updated_at`). The AI assistant's identity + group context, edited from
+  `/admin/ai`. See §8.8.
+- **`ai_documents`** — AI knowledge base: `id serial`, `filename`,
+  `content_type`, `content bytea` (original, for download), `text_content`
+  (extracted once at upload), `size_bytes`, `enabled`, `created_at`.
 
 Passwords are bcrypt (salted, irreversible). Never stored in cleartext.
 
@@ -471,8 +477,14 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
 - **Identity** = Gemini `system_instruction` + model name + on/off switch,
   stored in `ai_persona` (§5) and edited at `/admin/ai` (sidebar "IA"). It's
   cached in memory (`AiPersonaService`, `LocationService` pattern), so changes
-  apply to the next mention without restarting. The panel also has
-  **"Probar"**: runs a test prompt with the *unsaved* form values.
+  apply to the next mention without restarting.
+- **Panel layout (`/admin/ai`):** header (hint + "Guardar cambios") over a
+  fixed 2-column grid of tiles — Identidad | Contexto del grupo, then Modelo y
+  estado (on/off switch + model dropdown) | Documentos; one column under
+  1000 px. The settings fields live in different tiles but all belong to one
+  empty `<form id="ai-settings">` via the `form=` attribute, so the Documentos
+  tile can hold its own forms without nesting. The old "Probar" test box was
+  **removed at the user's request** (2026-10-14) — test by mentioning the bot.
 - **Conversation threads:** replying to a bot message sends Gemini a
   turn-based conversation (bot = `model`, people = `user`, each user turn
   prefixed with `[Сообщение от <name>]`). The full thread behind each bot
@@ -509,8 +521,23 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   newest images, drops older ones and tags those turns with
   `[изображения из этого сообщения больше недоступны]`. Before this, the handler
   filtered `filters.TEXT` only and the model *claimed* it could see photos it
-  never received. `/admin/ai` "Probar" accepts an optional image upload
-  (multipart; `client_max_size` = 15 MB).
+  never received.
+- **Context + knowledge base:** besides the identity, `/admin/ai` has a
+  "Contexto del grupo" textarea (`AiPersona.context`, ≤ 50k chars) and a
+  "Documentos" card (upload several at once, toggle Activo/Inactivo, download,
+  delete with confirm). `FileTextExtractor` extracts text at upload: text/
+  config formats (UTF-8 → cp1251 → latin-1), HTML/XML (tags stripped), DOCX
+  (stdlib zip+XML), PDF (`pypdf`; scanned PDFs have no text → rejected).
+  `KnowledgeBase` (cached like `AiPersonaService`) caps **enabled** text at
+  400k chars (~100k tokens) because it's sent with **every** question: an
+  upload that doesn't fit is stored *disabled*, and enabling past the cap is
+  refused. `build_system_instruction()` = identity + `# Context` +
+  `# Knowledge base` with each doc in `<document name="…">` (reference data,
+  "say so instead of inventing"). The `LanguageModel` port now takes
+  `(model, system_instruction, conversation)`; composing it is application
+  logic. Downloads are always `application/octet-stream` + attachment +
+  `nosniff` (user-uploaded content). Verified live: answers from context and
+  a DOCX, and says it doesn't know for facts absent from both.
 - **Model dropdown:** `/admin/ai` lists the models the key can use
   (`ModelCatalog` port → `GeminiModelCatalog`, `GET v1beta/models`, cached 1 h,
   only `gemini*` with `generateContent`, minus tts/audio/transcribe/image/
@@ -524,6 +551,12 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   `application/ports/language_model.py` (`LanguageModel`, `LanguageModelError`),
   `application/services/conversation_memory.py`,
   `application/ports/model_catalog.py`, `infrastructure/ai/gemini_model_catalog.py`,
+  `domain/entities/knowledge_document.py`,
+  `domain/repositories/knowledge_document_repository.py`,
+  `application/ports/document_text_extractor.py`,
+  `application/services/knowledge_base.py`, `application/services/system_prompt.py`,
+  `infrastructure/documents/file_text_extractor.py`,
+  `infrastructure/persistence/postgres_knowledge_document_repository.py`,
   `application/services/ai_persona_service.py`,
   `application/use_cases/answer_mention.py`,
   `infrastructure/ai/gemini_language_model.py`,
@@ -532,22 +565,20 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   `infrastructure/telegram/album_collector.py`,
   `infrastructure/telegram/markdown_to_html.py`,
   `resources/views/admin/ai.html`.
-- `build_admin_app(...)` gained `ai_personas`, `answer_mention` and
-  `model_catalog` (6th–8th, before `renderer`); the last two are `None` when
-  `GEMINI_API_KEY` is empty.
+- `build_admin_app(...)` gained `ai_personas`, `answer_mention`,
+  `model_catalog` and `knowledge` (6th–9th, before `renderer`);
+  `answer_mention`/`model_catalog` are `None` when `GEMINI_API_KEY` is empty.
 - **Formatting:** Gemini answers in Markdown; Telegram only understands its
   HTML subset. `infrastructure/telegram/markdown_to_html.py` converts:
   `#` headings → `<b>`, `**`/`__` → `<b>`, `*`/`_` → `<i>` (not inside
   words, so `snake_case` survives), `~~` → `<s>`, inline/fenced code →
   `<code>`/`<pre>`, `>` → `<blockquote>`, lists → `•`, `---` → a rule line,
   **tables → aligned monospace `<pre>`** (numeric columns right-aligned; key
-  for analytics). Links only for http(s)/tg/mailto (the same HTML is shown
-  with `|safe` in the panel preview). Lines whose markers cross
+  for analytics). Links only for http(s)/tg/mailto. Lines whose markers cross
   (`**a *b** c*`) fall back to plain escaped text so the HTML is always
   balanced. `split_markdown()` chunks the *Markdown* (3500 chars) before
   converting, closing/reopening ``` fences across chunks. If Telegram still
-  rejects a chunk (`BadRequest`), it's resent as plain text. The panel's
-  "Probar" shows a "Vista previa como en Telegram".
+  rejects a chunk (`BadRequest`), it's resent as plain text.
 - Not built (yet): per-user rate limit.
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)

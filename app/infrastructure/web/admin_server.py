@@ -9,7 +9,9 @@ Rutas protegidas (sesion con role=admin):
     /admin/location           -> configure the town/city
     /admin/location/confirm   -> confirm town when the search is ambiguous
     /admin/alerts             -> enable/disable tracked price-alert instruments
-    /admin/ai                 -> AI assistant identity (Gemini) + test prompt
+    /admin/ai                 -> AI assistant identity + context + model (Gemini)
+    /admin/ai/documents       -> upload knowledge-base documents
+    /admin/ai/documents/{id}/toggle|delete|download
 
 Vistas en resources/views/ (Jinja2), assets en resources/static/. Este modulo
 solo orquesta: arma el contexto y delega el render en ViewRenderer.
@@ -17,30 +19,24 @@ Presentacion pura, sin logica de dominio.
 """
 from __future__ import annotations
 
-import base64
 from pathlib import Path
+from urllib.parse import quote
 
 from aiohttp import web
 
-from application.ports.language_model import LanguageModelError
 from application.ports.model_catalog import ModelCatalog, ModelCatalogError, ModelInfo
 from application.ports.municipality_directory import MunicipalityDirectory
 from application.services.ai_persona_service import AiPersonaService
 from application.services.instrument_settings_service import InstrumentSettingsService
+from application.services.knowledge_base import KnowledgeBase, KnowledgeBaseError
 from application.services.location_service import LocationService
 from application.services.user_service import UserService
 from application.services.uptime_service import UptimeService
 from application.use_cases.answer_mention import AnswerMention
-from domain.value_objects.ai_persona import MAX_SYSTEM_INSTRUCTION_LENGTH, AiPersona
-from domain.value_objects.chat_turn import ChatTurn
-from domain.value_objects.image_attachment import (
-    MAX_IMAGE_BYTES,
-    SUPPORTED_IMAGE_TYPES,
-    ImageAttachment,
-)
+from domain.value_objects.ai_persona import MAX_CONTEXT_LENGTH, MAX_SYSTEM_INSTRUCTION_LENGTH, AiPersona
+from domain.entities.knowledge_document import CHARS_PER_TOKEN, KnowledgeDocument
 from domain.value_objects.municipality import Municipality
 from infrastructure.config.instruments import INSTRUMENTS
-from infrastructure.telegram.markdown_to_html import markdown_to_telegram_html
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
 
@@ -118,6 +114,40 @@ def _model_groups(models: tuple[ModelInfo, ...], current: str) -> list[dict]:
     return result
 
 
+def _human_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size / (1024 * 1024):.1f} MB".replace(".", ",")
+
+
+def _thousands(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
+
+
+def _knowledge_context(knowledge: KnowledgeBase) -> dict:
+    used = knowledge.enabled_chars()
+    return {
+        "documents": [
+            {
+                "id": d.id,
+                "filename": d.filename,
+                "size": _human_size(d.size_bytes),
+                "tokens": _thousands(d.approx_tokens),
+                "enabled": d.enabled,
+                "uploaded": d.created_at.strftime("%d/%m/%Y"),
+            }
+            for d in knowledge.documents
+        ],
+        "knowledge_tokens": _thousands(used // CHARS_PER_TOKEN),
+        "knowledge_max_tokens": _thousands(knowledge.max_total_chars // CHARS_PER_TOKEN),
+        "knowledge_percent": min(100, round(100 * used / knowledge.max_total_chars)) if knowledge.max_total_chars else 0,
+        "document_accept": ",".join(knowledge.supported_extensions),
+        "max_document_mb": knowledge.max_document_bytes // (1024 * 1024),
+    }
+
+
 def _ai_context(
     persona: AiPersona,
     available: bool,
@@ -125,9 +155,6 @@ def _ai_context(
     catalog_error: str = "",
     message: str = "",
     message_class: str = "",
-    test_prompt: str = "",
-    test_answer: str = "",
-    test_image_url: str = "",
 ) -> dict:
     return {
         "active": "ai",
@@ -138,14 +165,7 @@ def _ai_context(
         "model_groups": model_groups,
         "catalog_error": catalog_error,
         "max_length": MAX_SYSTEM_INSTRUCTION_LENGTH,
-        "test_prompt": test_prompt,
-        # Vista previa tal como se vera en Telegram. Es seguro marcarla |safe:
-        # el conversor escapa todo el texto y solo emite etiquetas fijas con
-        # enlaces http(s)/tg/mailto.
-        "test_answer_html": markdown_to_telegram_html(test_answer) if test_answer else "",
-        "test_image_url": test_image_url,
-        "image_accept": ",".join(sorted(SUPPORTED_IMAGE_TYPES)),
-        "max_image_mb": MAX_IMAGE_BYTES // (1024 * 1024),
+        "max_context_length": MAX_CONTEXT_LENGTH,
     }
 
 
@@ -193,14 +213,16 @@ def build_admin_app(
     ai_personas: AiPersonaService,
     answer_mention: AnswerMention | None,
     model_catalog: ModelCatalog | None,
+    knowledge: KnowledgeBase,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
     renderer = renderer or ViewRenderer()
-    # client_max_size: el formulario de prueba de IA admite subir una imagen.
+    # client_max_size: el panel de IA admite subir varios documentos de la
+    # base de conocimiento de una vez.
     app = web.Application(
         middlewares=[_auth_middleware(user_service, sessions)],
-        client_max_size=MAX_IMAGE_BYTES + 1024 * 1024,
+        client_max_size=knowledge.max_document_bytes * 3 + 1024 * 1024,
     )
 
     def html_response(template: str, **context) -> web.Response:
@@ -315,17 +337,12 @@ def build_admin_app(
             return (), f"No se pudo obtener la lista de modelos ({exc}). Solo se muestra el guardado."
 
     async def render_ai(request: web.Request, persona: AiPersona, message: str = "",
-                        message_class: str = "", test_prompt: str = "", test_answer: str = "",
-                        test_image: ImageAttachment | None = None) -> web.Response:
+                        message_class: str = "") -> web.Response:
         models, catalog_error = await available_models()
-        test_image_url = (
-            f"data:{test_image.mime_type};base64,{base64.b64encode(test_image.data).decode('ascii')}"
-            if test_image else ""
-        )
         return html_response("admin/ai.html", **_ai_context(
             persona, answer_mention is not None, _model_groups(models, persona.model), catalog_error,
-            message, message_class, test_prompt, test_answer, test_image_url,
-        ), **_user_context(request))
+            message, message_class,
+        ), **_knowledge_context(knowledge), **_user_context(request))
 
     async def ai_get(request: web.Request) -> web.Response:
         return await render_ai(request, ai_personas.current)
@@ -337,6 +354,7 @@ def build_admin_app(
                 system_instruction=str(data.get("system_instruction", "")).replace("\r\n", "\n").strip(),
                 model=str(data.get("model", "")).strip(),
                 enabled=data.get("enabled") == "on",
+                context=str(data.get("context", "")).replace("\r\n", "\n").strip(),
             )
         except ValueError as exc:
             return await render_ai(request, ai_personas.current, str(exc), "err")
@@ -347,35 +365,70 @@ def build_admin_app(
         if models and persona.model != ai_personas.current.model and persona.model not in {m.id for m in models}:
             return await render_ai(request, ai_personas.current, f"Modelo no disponible: {persona.model}.", "err")
 
-        if data.get("action") != "test":
-            await ai_personas.change(persona)
-            return await render_ai(request, persona, "Identidad guardada.", "ok")
+        await ai_personas.change(persona)
+        return await render_ai(request, persona, "Identidad y contexto guardados.", "ok")
 
-        # Probar: usa lo escrito en el formulario SIN guardarlo.
-        test_prompt = str(data.get("test_prompt", "")).strip()
-        upload = data.get("test_image")
-        test_image: ImageAttachment | None = None
-        if isinstance(upload, web.FileField):
-            raw = upload.file.read()
-            if raw:
-                try:
-                    test_image = ImageAttachment(upload.content_type, raw)
-                except ValueError:
-                    return await render_ai(request, persona, (
-                        f"Imagen no válida: usa JPG, PNG, WEBP o HEIC de hasta {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
-                    ), "err", test_prompt)
-        if answer_mention is None:
-            return await render_ai(request, persona, "Falta GEMINI_API_KEY en el .env.", "err", test_prompt)
-        if not test_prompt and test_image is None:
-            return await render_ai(request, persona, "Escribe un mensaje de prueba o adjunta una imagen.", "err")
-        turn = ChatTurn("user", test_prompt, (test_image,) if test_image else ())
+    # ---------------- admin: base de conocimiento ----------------
+    def document_id(request: web.Request) -> int:
         try:
-            answer = await answer_mention.execute([turn], persona)
-        except LanguageModelError as exc:
-            return await render_ai(request, persona, str(exc), "err", test_prompt, test_image=test_image)
-        return await render_ai(
-            request, persona, "Prueba realizada (sin guardar).", "ok", test_prompt, answer, test_image
-        )
+            return int(request.match_info["document_id"])
+        except ValueError:
+            raise web.HTTPNotFound()
+
+    async def documents_upload(request: web.Request) -> web.Response:
+        data = await request.post()
+        uploads = [f for f in data.getall("documents", []) if isinstance(f, web.FileField) and f.filename]
+        if not uploads:
+            return await render_ai(request, ai_personas.current, "Elige al menos un fichero.", "err")
+        saved, disabled, errors = [], [], []
+        for upload in uploads:
+            try:
+                document = await knowledge.add(
+                    upload.filename, upload.content_type or "application/octet-stream", upload.file.read()
+                )
+            except KnowledgeBaseError as exc:
+                errors.append(str(exc))
+                continue
+            (saved if document.enabled else disabled).append(document.filename)
+        parts = []
+        if saved:
+            parts.append("Subido: " + ", ".join(saved) + ".")
+        if disabled:
+            parts.append(
+                "Guardado pero DESACTIVADO por superar el límite de tokens por pregunta: "
+                + ", ".join(disabled) + "."
+            )
+        parts.extend(errors)
+        return await render_ai(request, ai_personas.current, " ".join(parts), "err" if errors or disabled else "ok")
+
+    async def documents_toggle(request: web.Request) -> web.Response:
+        data = await request.post()
+        enabled = data.get("enabled") == "1"
+        try:
+            await knowledge.set_enabled(document_id(request), enabled)
+        except KnowledgeBaseError as exc:
+            return await render_ai(request, ai_personas.current, str(exc), "err")
+        raise web.HTTPFound("/admin/ai#documents")
+
+    async def documents_delete(request: web.Request) -> web.Response:
+        try:
+            await knowledge.delete(document_id(request))
+        except KnowledgeBaseError as exc:
+            return await render_ai(request, ai_personas.current, str(exc), "err")
+        raise web.HTTPFound("/admin/ai#documents")
+
+    async def documents_download(request: web.Request) -> web.Response:
+        original = await knowledge.original(document_id(request))
+        if original is None:
+            raise web.HTTPNotFound()
+        filename, _, content = original
+        # Siempre como descarga y sin interpretar el tipo: el fichero lo subio
+        # un usuario y no debe ejecutarse en el origen del panel.
+        return web.Response(body=content, headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "X-Content-Type-Options": "nosniff",
+        })
 
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
@@ -392,6 +445,10 @@ def build_admin_app(
     app.router.add_post("/admin/alerts", alerts_post)
     app.router.add_get("/admin/ai", ai_get)
     app.router.add_post("/admin/ai", ai_post)
+    app.router.add_post("/admin/ai/documents", documents_upload)
+    app.router.add_post("/admin/ai/documents/{document_id}/toggle", documents_toggle)
+    app.router.add_post("/admin/ai/documents/{document_id}/delete", documents_delete)
+    app.router.add_get("/admin/ai/documents/{document_id}/download", documents_download)
     app.router.add_get("/health", health)
     app.router.add_static("/static/", _STATIC_DIR)
     return app
