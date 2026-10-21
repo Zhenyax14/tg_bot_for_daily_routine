@@ -603,9 +603,12 @@ The main bot is untouched (it still ignores topic messages).
   message_id): a message replying to a known one joins its topic, anything
   else opens a new one. In forum topics a "loose" message arrives as a reply
   to the topic-creation message — that is not treated as a reply.
-- **Anti-loop limit:** max **5 messages per bot per topic**
-  (`MAX_MESSAGES_PER_BOT_PER_TOPIC`); exhausted → silent in that topic. A
-  failed answer gives the slot back. The prompt tells the bot its message
+- **Anti-loop limit:** max **5 messages per bot per topic between two human
+  messages** (`MAX_MESSAGES_PER_BOT_PER_TOPIC`); exhausted → silent until a
+  person writes in that topic, which resets every bot's counter
+  (`SquadTopics.reset_counts`, only on the first copy of the message — each
+  bot's handler delivers its own). So a person always gets an answer; only
+  bot↔bot relays are capped. A failed answer gives the slot back. The prompt tells the bot its message
   number and to wrap up on the last one.
 - **Context:** the bot gets the topic transcript up to the trigger message,
   its own messages as `model`, everyone else as `user` with a

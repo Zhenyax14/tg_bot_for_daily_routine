@@ -75,6 +75,13 @@ class SquadTopics:
         sent[slot] += 1
         return sent[slot]
 
+    def reset_counts(self, topic_id: int) -> None:
+        """Pone a cero los mensajes de todos los bots en el tema (ha
+        intervenido una persona: ya no es un bucle entre bots)."""
+        topic = self._topics.get(topic_id)
+        if topic is not None:
+            topic.sent.clear()
+
     def release(self, topic_id: int, slot: int) -> None:
         """Devuelve una reserva cuyo mensaje no llego a publicarse."""
         topic = self._topics.get(topic_id)
