@@ -1,0 +1,68 @@
+{% extends "admin/layout.html" %}
+{% block title %}Bots · Panel Bot{% endblock %}
+{% block heading %}Bots del topic{% endblock %}
+{% block content %}
+<div class="ai-page squad-page">
+  <header class="ai-head">
+    <p>Tres bots que conversan en su <strong>topic</strong> del grupo. Responden cuando alguien los menciona o responde a uno de sus mensajes, y pueden hablar entre ellos mencionándose. Cada bot publica como máximo <strong>{{ limit }} mensajes por tema</strong> (cadena de respuestas). Los cambios se aplican al instante.</p>
+  </header>
+
+  {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
+  {% if catalog_error %}<div class="msg err">{{ catalog_error }}</div>{% endif %}
+
+  <div class="squad-grid">
+    {% for bot in bots %}
+    {% set p = bot.persona %}
+    <form method="post" action="/admin/squad" class="ai-tile squad-tile{% if saved_slot == p.slot %} saved{% endif %}" id="bot-{{ p.slot }}">
+      <input type="hidden" name="slot" value="{{ p.slot }}">
+      <div class="ai-tile-head">
+        <span class="ai-tile-icon squad-number">{{ p.slot }}</span>
+        <div>
+          {% if bot.member %}
+          <h2>{{ bot.member.name }}</h2>
+          <p class="squad-status on"><span class="dot"></span>@{{ bot.member.username }}</p>
+          {% else %}
+          <h2>Bot {{ p.slot }}</h2>
+          <p class="squad-status"><span class="dot"></span>Sin conectar · revisa <code>AI_BOT_{{ p.slot }}_TOKEN</code> y <code>AI_BOT_{{ p.slot }}_GEMINI_KEY</code></p>
+          {% endif %}
+        </div>
+      </div>
+
+      <label class="ai-switch">
+        <input type="checkbox" name="enabled" {% if p.enabled %}checked{% endif %}>
+        <span class="ai-switch-track" aria-hidden="true"><span></span></span>
+        <span>Responder en el topic</span>
+      </label>
+
+      <label class="ai-label" for="personality-{{ p.slot }}">Personalidad</label>
+      <textarea id="personality-{{ p.slot }}" name="personality" rows="9" maxlength="{{ max_personality_length }}"
+        placeholder="Quién es, cómo habla, en qué idioma responde…">{{ p.personality }}</textarea>
+
+      <label class="ai-label" for="secret-{{ p.slot }}">Meta secreta</label>
+      <textarea id="secret-{{ p.slot }}" name="secret_goal" rows="4" maxlength="{{ max_secret_goal_length }}" class="squad-secret"
+        placeholder="Lo que intenta conseguir sin decirlo nunca…">{{ p.secret_goal }}</textarea>
+      <p class="ai-note">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke-width="2"/><path d="M8 11V7a4 4 0 018 0v4" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>La persigue de forma sutil y nunca la revela, aunque se lo pregunten.</span>
+      </p>
+
+      <label class="ai-label" for="model-{{ p.slot }}">Modelo</label>
+      <div class="ai-select">
+        <select id="model-{{ p.slot }}" name="model" required>
+          {% for group in bot.model_groups %}
+          <optgroup label="{{ group.label }}">
+            {% for model in group.models %}
+            <option value="{{ model.id }}" {% if model.id == p.model %}selected{% endif %}>{{ model.display_name }} — {{ model.id }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+        <svg class="ai-select-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+
+      <button type="submit" class="ai-save squad-save">Guardar bot {{ p.slot }}</button>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

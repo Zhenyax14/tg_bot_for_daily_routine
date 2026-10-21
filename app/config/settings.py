@@ -15,6 +15,16 @@ _REQUIRED = (
     "ADMIN_PASSWORD",
 )
 _TRUTHY = {"1", "true", "yes", "on"}
+_SQUAD_SLOTS = (1, 2, 3)
+
+
+@dataclass(frozen=True, slots=True)
+class SquadBotSettings:
+    """Un bot del topic multi-bot: su token de Telegram y su clave de Gemini."""
+
+    slot: int
+    token: str
+    gemini_api_key: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +44,8 @@ class Settings:
     admin_password: str
     admin_role: str
     gemini_api_key: str
+    squad_thread_id: int
+    squad_bots: tuple[SquadBotSettings, ...]
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -50,6 +62,10 @@ class Settings:
             raise ConfigError(
                 f"PRICE_ALERTS_THREAD_ID debe ser numérico, recibido {raw_price_alerts_thread!r}"
             )
+
+        raw_squad_thread = os.getenv("AI_BOTS_THREAD_ID", "418798").strip()
+        if not raw_squad_thread.lstrip("-").isdigit():
+            raise ConfigError(f"AI_BOTS_THREAD_ID debe ser numérico, recibido {raw_squad_thread!r}")
 
         raw_port = os.getenv("WEB_PORT", "8080").strip()
         if not raw_port.isdigit():
@@ -91,4 +107,14 @@ class Settings:
             admin_role=os.getenv("ADMIN_ROLE", "admin").strip(),
             # Opcional: vacio = el asistente de IA queda desactivado.
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            squad_thread_id=int(raw_squad_thread),
+            # Opcionales: un bot sin token o sin clave simplemente no arranca.
+            squad_bots=tuple(
+                SquadBotSettings(
+                    slot,
+                    os.getenv(f"AI_BOT_{slot}_TOKEN", "").strip(),
+                    os.getenv(f"AI_BOT_{slot}_GEMINI_KEY", "").strip(),
+                )
+                for slot in _SQUAD_SLOTS
+            ),
         )

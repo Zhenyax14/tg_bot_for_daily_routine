@@ -538,12 +538,26 @@ body{min-height:100vh;display:flex;flex-direction:column}
 }
 .ai-upload-btn:hover{background:var(--yellow-deep)}
 
+/* ============ bots del topic: una tarjeta (formulario) por bot ============ */
+.squad-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.2rem;align-items:start}
+.squad-tile.saved{border-color:var(--yellow)}
+.squad-number{font-family:'Space Grotesk',sans-serif;font-weight:700;color:var(--yellow-deep)}
+.squad-status{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.squad-status .dot{width:.5rem;height:.5rem;border-radius:50%;background:#c4bba8;flex-shrink:0}
+.squad-status.on .dot{background:#28a745}
+.squad-status code{font-family:'Space Grotesk',monospace;font-size:.95em}
+.squad-tile textarea{min-height:6rem}
+.squad-save{align-self:flex-start}
+
+@media(max-width:1200px){
+  .squad-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media(max-width:1000px){
-  .ai-grid{grid-template-columns:1fr}
+  .ai-grid,.squad-grid{grid-template-columns:1fr}
   .ai-tile-text textarea{min-height:10rem}
 }
 @media(max-width:720px){
   .ai-head{flex-direction:column;align-items:stretch;gap:.8rem}
-  .ai-save{width:100%}
+  .ai-save,.squad-save{width:100%}
   .ai-tile{padding:1.1rem}
 }

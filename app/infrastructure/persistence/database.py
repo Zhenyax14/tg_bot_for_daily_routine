@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS ai_documents (
     enabled      boolean NOT NULL DEFAULT true,
     created_at   timestamptz NOT NULL DEFAULT now()
 );
+
+-- Bots del topic multi-bot: una fila por bot (slot 1..3).
+CREATE TABLE IF NOT EXISTS squad_personas (
+    slot        smallint PRIMARY KEY CHECK (slot BETWEEN 1 AND 3),
+    personality text NOT NULL DEFAULT '',
+    secret_goal text NOT NULL DEFAULT '',
+    model       text NOT NULL,
+    enabled     boolean NOT NULL DEFAULT true,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
 """
 
 

@@ -178,6 +178,8 @@ Key vars:
 | `STARTUP_MESSAGE` | no | `Инициализируюсь...` | sent on every startup |
 | `PRICE_ALERTS_THREAD_ID` | no | `331017` | topic id for price-alert messages, same group as `CHAT_ID` |
 | `GEMINI_API_KEY` | no | empty | Google Gemini key; empty = AI assistant disabled (see §8.8) |
+| `AI_BOT_{1,2,3}_TOKEN` / `AI_BOT_{1,2,3}_GEMINI_KEY` | no | empty | topic bots (§8.9); a slot missing either one doesn't start |
+| `AI_BOTS_THREAD_ID` | no | `418798` | topic of the multi-bot conversation, same group as `CHAT_ID` |
 
 ---
 
@@ -203,6 +205,9 @@ Applied idempotently on every startup (`CREATE TABLE IF NOT EXISTS` +
 - **`ai_documents`** — AI knowledge base: `id serial`, `filename`,
   `content_type`, `content bytea` (original, for download), `text_content`
   (extracted once at upload), `size_bytes`, `enabled`, `created_at`.
+
+- **`squad_personas`** — one row per topic bot (`slot smallint PK CHECK 1..3`,
+  `personality`, `secret_goal`, `model`, `enabled`, `updated_at`). See §8.9.
 
 Passwords are bcrypt (salted, irreversible). Never stored in cleartext.
 
@@ -270,6 +275,7 @@ Only `role == "admin"` may enter the panel.
     section (protected).
   - `/admin/alerts` (GET/POST) — enable/disable price-alert instruments
     (protected, added with the price-alerts feature; see §8.7).
+  - `/admin/squad` (GET/POST) — the 3 topic bots (see §8.9).
   - `/static/...` — assets (excluded from auth middleware).
   - Public paths in middleware: `{"/", "/login", "/logout", "/health"}` +
     `/static/`.
@@ -580,6 +586,45 @@ plain-text reply (split at 4096 chars). Works with BotFather privacy mode ON
   converting, closing/reopening ``` fences across chunks. If Telegram still
   rejects a chunk (`BadRequest`), it's resent as plain text.
 - Not built (yet): per-user rate limit.
+
+### 8.9 Topic bots (multi-bot conversation) — built, pending live test
+
+Up to 3 extra Telegram bots living **only** in topic `AI_BOTS_THREAD_ID`
+(`https://t.me/c/1390219899/418798`). Each has its own BotFather token, its own
+Gemini key, and its own identity edited at `/admin/squad` (sidebar "Bots"):
+personality + **secret goal** (pursued subtly, never revealed) + model + on/off.
+The main bot is untouched (it still ignores topic messages).
+
+- **Triggers:** a person @mentions a bot or replies to one of its messages →
+  that bot answers as a reply. If a bot's answer @mentions another bot, that
+  bot answers in turn. **Telegram never delivers bot messages to other bots**,
+  so this relay happens in-process (`RunSquadConversation`), not via Telegram.
+- **Topic ("tema") = reply chain** (`SquadTopics`, in memory, keyed by
+  message_id): a message replying to a known one joins its topic, anything
+  else opens a new one. In forum topics a "loose" message arrives as a reply
+  to the topic-creation message — that is not treated as a reply.
+- **Anti-loop limit:** max **5 messages per bot per topic**
+  (`MAX_MESSAGES_PER_BOT_PER_TOPIC`); exhausted → silent in that topic. A
+  failed answer gives the slot back. The prompt tells the bot its message
+  number and to wrap up on the last one.
+- **Context:** the bot gets the topic transcript up to the trigger message,
+  its own messages as `model`, everyone else as `user` with a
+  `[Message from <name>]` header (consecutive same-role turns merged).
+  After a restart, the quoted message seeds a new topic.
+- Text only (photo captions included; images are not sent to the model).
+- Each bot is its own `Application`, started in the main bot's `post_init`
+  (`initialize/start/updater.start_polling`) and stopped in `post_shutdown`; a
+  bad token logs an error and doesn't affect the others. Disabled in `DRY_RUN`.
+- Files: `domain/value_objects/squad_persona.py`, `squad_message.py`,
+  `domain/repositories/squad_persona_repository.py`,
+  `application/ports/squad_gateway.py`, `application/services/squad_topics.py`,
+  `squad_prompt.py`, `squad_persona_service.py`,
+  `application/use_cases/run_squad_conversation.py`,
+  `infrastructure/persistence/postgres_squad_persona_repository.py`,
+  `infrastructure/telegram/telegram_squad_gateway.py`, `squad_message_handler.py`,
+  `resources/views/admin/squad.html`.
+- `build_admin_app(...)` gained `squad_personas`, `squad_members`,
+  `squad_model_catalog` (10th–12th, before `renderer`).
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)
 
