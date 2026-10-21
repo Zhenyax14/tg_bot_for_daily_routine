@@ -12,6 +12,7 @@ Rutas protegidas (sesion con role=admin):
     /admin/ai                 -> AI assistant identity + context + model (Gemini)
     /admin/ai/documents       -> upload knowledge-base documents
     /admin/ai/documents/{id}/toggle|delete|download
+    /admin/squad              -> the 3 topic bots: personality + secret goal + model
 
 Vistas en resources/views/ (Jinja2), assets en resources/static/. Este modulo
 solo orquesta: arma el contexto y delega el render en ViewRenderer.
@@ -20,6 +21,7 @@ Presentacion pura, sin logica de dominio.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Mapping
 from urllib.parse import quote
 
 from aiohttp import web
@@ -30,12 +32,16 @@ from application.services.ai_persona_service import AiPersonaService
 from application.services.instrument_settings_service import InstrumentSettingsService
 from application.services.knowledge_base import KnowledgeBase, KnowledgeBaseError
 from application.services.location_service import LocationService
+from application.services.squad_persona_service import SquadPersonaService
 from application.services.user_service import UserService
 from application.services.uptime_service import UptimeService
 from application.use_cases.answer_mention import AnswerMention
+from application.use_cases.run_squad_conversation import MAX_MESSAGES_PER_BOT_PER_TOPIC
 from domain.value_objects.ai_persona import MAX_CONTEXT_LENGTH, MAX_SYSTEM_INSTRUCTION_LENGTH, AiPersona
 from domain.entities.knowledge_document import CHARS_PER_TOKEN, KnowledgeDocument
 from domain.value_objects.municipality import Municipality
+from domain.value_objects.squad_message import SquadMember
+from domain.value_objects.squad_persona import MAX_PERSONALITY_LENGTH, MAX_SECRET_GOAL_LENGTH, SquadPersona
 from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
@@ -169,6 +175,31 @@ def _ai_context(
     }
 
 
+def _squad_context(
+    personas: list[SquadPersona],
+    members: Mapping[int, SquadMember],
+    model_groups: dict[int, list[dict]],
+    catalog_error: str = "",
+    message: str = "",
+    message_class: str = "",
+    saved_slot: int | None = None,
+) -> dict:
+    return {
+        "active": "squad",
+        "message": message,
+        "message_class": message_class,
+        "saved_slot": saved_slot,
+        "catalog_error": catalog_error,
+        "limit": MAX_MESSAGES_PER_BOT_PER_TOPIC,
+        "max_personality_length": MAX_PERSONALITY_LENGTH,
+        "max_secret_goal_length": MAX_SECRET_GOAL_LENGTH,
+        "bots": [
+            {"persona": persona, "member": members.get(persona.slot), "model_groups": model_groups[persona.slot]}
+            for persona in personas
+        ],
+    }
+
+
 def _user_context(request: web.Request) -> dict:
     user = request.get("user")
     if user is None:
@@ -214,6 +245,9 @@ def build_admin_app(
     answer_mention: AnswerMention | None,
     model_catalog: ModelCatalog | None,
     knowledge: KnowledgeBase,
+    squad_personas: SquadPersonaService,
+    squad_members: Callable[[], Mapping[int, SquadMember]],
+    squad_model_catalog: ModelCatalog | None,
     renderer: ViewRenderer | None = None,
 ) -> web.Application:
     sessions = SessionStore()
@@ -430,6 +464,48 @@ def build_admin_app(
             "X-Content-Type-Options": "nosniff",
         })
 
+    # ---------------- admin: bots del topic ----------------
+    async def squad_models() -> tuple[tuple[ModelInfo, ...], str]:
+        if squad_model_catalog is None:
+            return (), ""
+        try:
+            return await squad_model_catalog.list_models(), ""
+        except ModelCatalogError as exc:
+            return (), f"No se pudo obtener la lista de modelos ({exc}). Solo se muestra el guardado."
+
+    async def render_squad(request: web.Request, message: str = "", message_class: str = "",
+                           saved_slot: int | None = None) -> web.Response:
+        models, catalog_error = await squad_models()
+        personas = squad_personas.all()
+        groups = {p.slot: _model_groups(models, p.model) for p in personas}
+        return html_response("admin/squad.html", **_squad_context(
+            personas, squad_members(), groups, catalog_error, message, message_class, saved_slot,
+        ), **_user_context(request))
+
+    async def squad_get(request: web.Request) -> web.Response:
+        return await render_squad(request)
+
+    async def squad_post(request: web.Request) -> web.Response:
+        data = await request.post()
+        try:
+            persona = SquadPersona(
+                slot=int(str(data.get("slot", ""))),
+                personality=str(data.get("personality", "")).replace("\r\n", "\n").strip(),
+                secret_goal=str(data.get("secret_goal", "")).replace("\r\n", "\n").strip(),
+                model=str(data.get("model", "")).strip(),
+                enabled=data.get("enabled") == "on",
+            )
+        except ValueError as exc:
+            return await render_squad(request, str(exc), "err")
+
+        current = squad_personas.get(persona.slot)
+        models, _ = await squad_models()
+        if models and persona.model != current.model and persona.model not in {m.id for m in models}:
+            return await render_squad(request, f"Modelo no disponible: {persona.model}.", "err", persona.slot)
+
+        await squad_personas.change(persona)
+        return await render_squad(request, f"Bot {persona.slot} guardado.", "ok", persona.slot)
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -449,6 +525,8 @@ def build_admin_app(
     app.router.add_post("/admin/ai/documents/{document_id}/toggle", documents_toggle)
     app.router.add_post("/admin/ai/documents/{document_id}/delete", documents_delete)
     app.router.add_get("/admin/ai/documents/{document_id}/download", documents_download)
+    app.router.add_get("/admin/squad", squad_get)
+    app.router.add_post("/admin/squad", squad_post)
     app.router.add_get("/health", health)
     app.router.add_static("/static/", _STATIC_DIR)
     return app
