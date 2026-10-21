@@ -51,7 +51,7 @@ class TelegramSquadGateway:
         except TelegramError as exc:
             logger.warning("Squad: typing de bot %s fallo: %s", slot, exc)
 
-    async def send(self, slot: int, text: str, reply_to: int) -> tuple[int, ...]:
+    async def send(self, slot: int, text: str, reply_to: int | None) -> tuple[int, ...]:
         sent = []
         try:
             for chunk in split_markdown(text, _CHUNK_CHARS):
@@ -69,7 +69,7 @@ class TelegramSquadGateway:
         except TelegramError as exc:
             raise SquadDeliveryError(f"Telegram: {exc}") from exc
 
-    async def _send_formatted(self, bot: Bot, markdown: str, reply_to: int) -> Message:
+    async def _send_formatted(self, bot: Bot, markdown: str, reply_to: int | None) -> Message:
         """Como en el asistente del hilo General: si Telegram no acepta el
         HTML convertido, se reenvia el trozo como texto plano."""
         try:
@@ -85,6 +85,8 @@ class TelegramSquadGateway:
             )
 
     @staticmethod
-    def _reply(message_id: int) -> ReplyParameters:
+    def _reply(message_id: int | None) -> ReplyParameters | None:
         # Si el mensaje citado se borro mientras el bot pensaba, se publica igual.
+        if message_id is None:
+            return None
         return ReplyParameters(message_id, allow_sending_without_reply=True)

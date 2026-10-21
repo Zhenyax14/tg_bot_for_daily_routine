@@ -207,7 +207,8 @@ Applied idempotently on every startup (`CREATE TABLE IF NOT EXISTS` +
   (extracted once at upload), `size_bytes`, `enabled`, `created_at`.
 
 - **`squad_personas`** — one row per topic bot (`slot smallint PK CHECK 1..3`,
-  `personality`, `secret_goal`, `model`, `enabled`, `updated_at`). See §8.9.
+  `personality`, `secret_goal`, `model`, `enabled`, `spontaneous_per_day`
+  (0..48, default 0), `updated_at`). See §8.9.
 
 Passwords are bcrypt (salted, irreversible). Never stored in cleartext.
 
@@ -611,6 +612,19 @@ The main bot is untouched (it still ignores topic messages).
   its own messages as `model`, everyone else as `user` with a
   `[Message from <name>]` header (consecutive same-role turns merged).
   After a restart, the quoted message seeds a new topic.
+- **Spontaneous messages:** each bot has "Mensajes espontáneos al día" in
+  `/admin/squad` (0..48, 0 = never). Every `SPONTANEOUS_CHECK_MINUTES` (5) the
+  scheduler calls `RunSquadConversation.speak_up()`: one roll per enabled,
+  connected bot with chance `per_day × 5 / 1440`; if several hit, one is
+  picked at random. It's skipped while a conversation is in flight. The bot
+  posts a standalone message (new topic, counts as its message 1) built from
+  its persona + the latest topic transcript + `SPONTANEOUS_CUE`; mentioning
+  another bot starts the usual relay. Any hour (no quiet hours, user's choice).
+- **Delivery needs privacy mode OFF** (BotFather → Group Privacy → Turn off,
+  then remove + re-add the bot) or the bot as group admin; otherwise mentions
+  in the topic never reach it. `SquadMessageHandler` logs
+  `Squad: bot N recibe mensaje …` for every topic message, so "no log line"
+  means Telegram isn't delivering.
 - Text only (photo captions included; images are not sent to the model).
 - Each bot is its own `Application`, started in the main bot's `post_init`
   (`initialize/start/updater.start_polling`) and stopped in `post_shutdown`; a

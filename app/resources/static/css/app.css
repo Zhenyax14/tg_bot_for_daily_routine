@@ -548,6 +548,12 @@ body{min-height:100vh;display:flex;flex-direction:column}
 .squad-status code{font-family:'Space Grotesk',monospace;font-size:.95em}
 .squad-tile textarea{min-height:6rem}
 .squad-save{align-self:flex-start}
+.squad-number-input{
+  display:block;width:6rem;height:2.8rem;padding:0 .9rem;font:inherit;font-size:.9rem;color:var(--ink);
+  background:var(--paper);border:1px solid var(--line);border-radius:.55rem;outline:none;
+  transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;
+}
+.squad-number-input:focus{background:#fff;border-color:var(--yellow-deep);box-shadow:0 0 0 3px rgba(244,180,0,.16)}
 
 @media(max-width:1200px){
   .squad-grid{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -4,7 +4,7 @@
 {% block content %}
 <div class="ai-page squad-page">
   <header class="ai-head">
-    <p>Tres bots que conversan en su <strong>topic</strong> del grupo. Responden cuando alguien los menciona o responde a uno de sus mensajes, y pueden hablar entre ellos mencionándose. Cada bot publica como máximo <strong>{{ limit }} mensajes por tema</strong> (cadena de respuestas). Los cambios se aplican al instante.</p>
+    <p>Tres bots que conversan en su <strong>topic</strong> del grupo. Responden cuando alguien los menciona o responde a uno de sus mensajes, y pueden hablar entre ellos mencionándose. También pueden escribir por iniciativa propia, a horas aleatorias. Cada bot publica como máximo <strong>{{ limit }} mensajes por tema</strong> (cadena de respuestas). Los cambios se aplican al instante.</p>
   </header>
 
   {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}
@@ -59,6 +59,11 @@
         </select>
         <svg class="ai-select-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
+
+      <label class="ai-label" for="spontaneous-{{ p.slot }}">Mensajes espontáneos al día</label>
+      <input id="spontaneous-{{ p.slot }}" name="spontaneous_per_day" type="number" class="squad-number-input"
+        min="0" max="{{ max_spontaneous_per_day }}" step="1" value="{{ p.spontaneous_per_day }}" required>
+      <p class="ai-note"><span>Media diaria, a horas aleatorias, según su personalidad y la última conversación. 0 = nunca.</span></p>
 
       <button type="submit" class="ai-save squad-save">Guardar bot {{ p.slot }}</button>
     </form>

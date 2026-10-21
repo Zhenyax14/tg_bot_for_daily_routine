@@ -17,9 +17,9 @@ class SquadGateway(Protocol):
 
     async def typing(self, slot: int) -> None: ...
 
-    async def send(self, slot: int, text: str, reply_to: int) -> tuple[int, ...]:
-        """Publica `text` (Markdown) como respuesta a `reply_to`; devuelve los
-        ids de los mensajes enviados (puede trocearse en varios)."""
+    async def send(self, slot: int, text: str, reply_to: int | None) -> tuple[int, ...]:
+        """Publica `text` (Markdown) como respuesta a `reply_to` (None = mensaje
+        suelto); devuelve los ids de los mensajes enviados (puede trocearse en varios)."""
         ...
 
     async def report_failure(self, slot: int, reply_to: int) -> None:

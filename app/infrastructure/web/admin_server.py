@@ -41,7 +41,12 @@ from domain.value_objects.ai_persona import MAX_CONTEXT_LENGTH, MAX_SYSTEM_INSTR
 from domain.entities.knowledge_document import CHARS_PER_TOKEN, KnowledgeDocument
 from domain.value_objects.municipality import Municipality
 from domain.value_objects.squad_message import SquadMember
-from domain.value_objects.squad_persona import MAX_PERSONALITY_LENGTH, MAX_SECRET_GOAL_LENGTH, SquadPersona
+from domain.value_objects.squad_persona import (
+    MAX_PERSONALITY_LENGTH,
+    MAX_SECRET_GOAL_LENGTH,
+    MAX_SPONTANEOUS_PER_DAY,
+    SquadPersona,
+)
 from infrastructure.config.instruments import INSTRUMENTS
 from infrastructure.web.session_store import SessionStore
 from infrastructure.web.view_renderer import ViewRenderer
@@ -193,6 +198,7 @@ def _squad_context(
         "limit": MAX_MESSAGES_PER_BOT_PER_TOPIC,
         "max_personality_length": MAX_PERSONALITY_LENGTH,
         "max_secret_goal_length": MAX_SECRET_GOAL_LENGTH,
+        "max_spontaneous_per_day": MAX_SPONTANEOUS_PER_DAY,
         "bots": [
             {"persona": persona, "member": members.get(persona.slot), "model_groups": model_groups[persona.slot]}
             for persona in personas
@@ -494,6 +500,7 @@ def build_admin_app(
                 secret_goal=str(data.get("secret_goal", "")).replace("\r\n", "\n").strip(),
                 model=str(data.get("model", "")).strip(),
                 enabled=data.get("enabled") == "on",
+                spontaneous_per_day=int(str(data.get("spontaneous_per_day", "0")).strip() or 0),
             )
         except ValueError as exc:
             return await render_squad(request, str(exc), "err")

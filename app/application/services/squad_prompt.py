@@ -4,7 +4,9 @@
   en el topic + cuantos mensajes le quedan en el tema;
 - la conversacion por turnos desde el punto de vista de ESE bot: sus propios
   mensajes van como `model`, los de personas y otros bots como `user` con una
-  cabecera que dice quien habla (si no, el modelo confunde a los autores).
+  cabecera que dice quien habla (si no, el modelo confunde a los autores);
+- para un mensaje espontaneo (nadie le ha escrito), la ultima conversacion
+  del topic seguida de una nota que le pide tomar la palabra.
 """
 from __future__ import annotations
 
@@ -16,6 +18,14 @@ from domain.value_objects.squad_message import SquadMember, SquadMessage
 from domain.value_objects.squad_persona import SquadPersona
 
 _MENTION = re.compile(r"@([A-Za-z0-9_]{5,32})")
+
+SPONTANEOUS_CUE = (
+    "[Note from the system, not from a participant]\n"
+    "Nobody has written to you: you are speaking up on your own initiative. Write one short "
+    "message to the topic that fits your personality and quietly serves your goal. You may "
+    "react to the recent conversation above (if any) or bring up something new, but do not "
+    "repeat what was already said. To start a debate, mention one of the other bots by @username."
+)
 
 
 def build_squad_instruction(
@@ -74,6 +84,17 @@ def squad_conversation(messages: Sequence[SquadMessage], slot: int) -> list[Chat
             turns[-1] = ChatTurn(role, f"{turns[-1].text}\n\n{text}")
         else:
             turns.append(ChatTurn(role, text))
+    return turns
+
+
+def spontaneous_conversation(recent: Sequence[SquadMessage], slot: int) -> list[ChatTurn]:
+    """La ultima conversacion del topic vista por el bot `slot`, mas la nota
+    que le pide hablar (el ultimo turno debe ser `user`)."""
+    turns = squad_conversation(recent, slot)
+    if turns and turns[-1].role == "user":
+        turns[-1] = ChatTurn("user", f"{turns[-1].text}\n\n{SPONTANEOUS_CUE}")
+    else:
+        turns.append(ChatTurn("user", SPONTANEOUS_CUE))
     return turns
 
 

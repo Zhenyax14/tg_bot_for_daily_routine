@@ -24,7 +24,7 @@ from application.use_cases.check_price_movements import CheckPriceMovements
 from application.use_cases.get_todays_holidays import GetTodaysHolidays
 from application.use_cases.get_upcoming_holidays import GetUpcomingHolidays
 from application.use_cases.get_world_times import GetWorldTimes
-from application.use_cases.run_squad_conversation import RunSquadConversation
+from application.use_cases.run_squad_conversation import SPONTANEOUS_CHECK_MINUTES, RunSquadConversation
 from application.use_cases.schedule_daily_messages import ScheduleDailyMessages
 from application.use_cases.send_message import SendMessage
 from config.errors import ConfigError
@@ -187,6 +187,13 @@ def build_application(settings: Settings) -> Application:
         squad_gateway,
         SquadTopics(),
     )
+    if squad_bots:
+        # Mensajes espontaneos: cada bot segun su media al dia (en /admin/squad).
+        scheduler.schedule_interval(
+            job_id="squad-spontaneous",
+            minutes=SPONTANEOUS_CHECK_MINUTES,
+            job=squad_conversation.speak_up,
+        )
     squad_apps: dict[int, Application] = {}
     for bot in squad_bots:
         squad_app = Application.builder().token(bot.token).build()

@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS squad_personas (
     enabled     boolean NOT NULL DEFAULT true,
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE squad_personas ADD COLUMN IF NOT EXISTS spontaneous_per_day smallint NOT NULL DEFAULT 0;
 """
 
 

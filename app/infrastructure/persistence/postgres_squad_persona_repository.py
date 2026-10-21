@@ -11,7 +11,8 @@ class PostgresSquadPersonaRepository:
 
     async def load_all(self) -> list[SquadPersona]:
         rows = await self._db.pool.fetch(
-            "SELECT slot, personality, secret_goal, model, enabled FROM squad_personas ORDER BY slot"
+            "SELECT slot, personality, secret_goal, model, enabled, spontaneous_per_day "
+            "FROM squad_personas ORDER BY slot"
         )
         return [
             SquadPersona(
@@ -20,16 +21,18 @@ class PostgresSquadPersonaRepository:
                 secret_goal=row["secret_goal"],
                 model=row["model"],
                 enabled=row["enabled"],
+                spontaneous_per_day=row["spontaneous_per_day"],
             )
             for row in rows
         ]
 
     async def save(self, persona: SquadPersona) -> None:
         await self._db.pool.execute(
-            "INSERT INTO squad_personas (slot, personality, secret_goal, model, enabled, updated_at) "
-            "VALUES ($1, $2, $3, $4, $5, now()) "
+            "INSERT INTO squad_personas (slot, personality, secret_goal, model, enabled, spontaneous_per_day, updated_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, now()) "
             "ON CONFLICT (slot) DO UPDATE SET personality = EXCLUDED.personality, "
             "secret_goal = EXCLUDED.secret_goal, model = EXCLUDED.model, enabled = EXCLUDED.enabled, "
-            "updated_at = now()",
+            "spontaneous_per_day = EXCLUDED.spontaneous_per_day, updated_at = now()",
             persona.slot, persona.personality, persona.secret_goal, persona.model, persona.enabled,
+            persona.spontaneous_per_day,
         )

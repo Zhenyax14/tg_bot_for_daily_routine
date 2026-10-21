@@ -63,6 +63,12 @@ class SquadTopics:
                 return messages[:index + 1]
         return list(messages)
 
+    def latest(self) -> list[SquadMessage]:
+        """Mensajes del tema con actividad mas reciente (vacio si no hay ninguno)."""
+        if not self._topics:
+            return []
+        return list(next(reversed(self._topics.values())).messages)
+
     def try_reserve(self, topic_id: int, slot: int, limit: int) -> int | None:
         """Reserva un mensaje del bot en el tema. Devuelve su numero (1..limit)
         o None si ya agoto el limite."""
