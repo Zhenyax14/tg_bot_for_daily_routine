@@ -34,6 +34,9 @@ class SquadMessageHandler:
         if message is None or message.from_user is None or message.from_user.is_bot:
             return
         if not (message.is_topic_message and message.message_thread_id == self._gateway.thread_id):
+            if _mentions(message, context.bot.username):
+                logger.info("Squad: bot %s mencionado fuera de su topic (hilo %s), se ignora",
+                            self._slot, message.message_thread_id)
             return
         text = message.text or message.caption or ""
         if not text.strip():
@@ -44,6 +47,7 @@ class SquadMessageHandler:
         addressed = _mentions(message, me.username) or (
             quoted is not None and quoted.from_user is not None and quoted.from_user.id == me.id
         )
+        logger.info("Squad: bot %s recibe mensaje de %s (dirigido a el=%s)", self._slot, _author(message), addressed)
         self._conversation.on_message(
             SquadMessage(
                 message.message_id, _author(message), text,
