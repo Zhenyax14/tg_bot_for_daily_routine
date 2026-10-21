@@ -4,7 +4,7 @@
 {% block content %}
 <div class="ai-page squad-page">
   <header class="ai-head">
-    <p>Tres bots que conversan en su <strong>topic</strong> del grupo. Responden cuando alguien los menciona o responde a uno de sus mensajes, y pueden hablar entre ellos mencionándose. También pueden escribir por iniciativa propia, a horas aleatorias. Cada bot publica como máximo <strong>{{ limit }} mensajes por tema</strong> (cadena de respuestas). Los cambios se aplican al instante.</p>
+    <p>Tres bots que conversan en su <strong>topic</strong> del grupo. Responden cuando alguien los menciona o responde a uno de sus mensajes, y pueden hablar entre ellos mencionándose. También pueden escribir por iniciativa propia, a horas aleatorias. Entre ellos, cada bot publica como máximo <strong>{{ limit }} mensajes seguidos por tema</strong> (cadena de respuestas); cuando una persona escribe, el contador vuelve a cero. Los cambios se aplican al instante.</p>
   </header>
 
   {% if message %}<div class="msg {{ message_class }}">{{ message }}</div>{% endif %}

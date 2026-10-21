@@ -6,9 +6,10 @@ otro bot, ese otro contesta a su vez, y asi sucesivamente: Telegram nunca
 entrega a un bot los mensajes de otro bot, asi que el relevo entre bots se
 hace aqui dentro, no a traves de Telegram.
 
-Freno anti-bucle: cada bot publica como maximo `limit` mensajes por tema
-(cadena de respuestas, ver SquadTopics). Agotado el cupo, se calla en ese
-tema; un mensaje nuevo (que no responde a la cadena) abre otro tema.
+Freno anti-bucle: entre dos intervenciones de personas, cada bot publica
+como maximo `limit` mensajes por tema (cadena de respuestas, ver
+SquadTopics). Agotado el cupo, se calla; en cuanto una persona escribe en el
+tema el cupo vuelve a empezar, asi que a una persona siempre se le contesta.
 
 Cada respuesta corre en su propia tarea: una cadena entre bots puede durar
 minutos y no debe bloquear el procesado de otros mensajes.
@@ -70,7 +71,12 @@ class RunSquadConversation:
         mensaje al que responde, por si no esta en memoria (tras reiniciar)."""
         if quoted is not None and not self._topics.knows(quoted.message_id):
             self._topics.record(quoted)
+        is_new = not self._topics.knows(message.message_id)
         topic_id = self._topics.record(message)
+        # Cada bot recibe su copia del mensaje: el cupo se reinicia solo con la
+        # primera, para no anular la reserva de un bot que ya esta contestando.
+        if is_new:
+            self._topics.reset_counts(topic_id)
         if addressed is not None:
             self._spawn(self._respond(addressed, message, topic_id, by_person=True))
 
