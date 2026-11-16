@@ -769,6 +769,82 @@ during closed hours ever actually matters — it currently doesn't.
 
 ## 9. Other pending / backlog
 
+### 9.1 PLANNED (not implemented): trade screenshots → Google Sheet
+
+Requested 2026-11-16, explicitly **documented only, not to be built yet**.
+The user sends the bot a **screenshot of their trades** from the **BBVA
+broker app** (confirmed 2026-11-16 — a single source, so one known layout to
+target in the extraction prompt); the bot **reads it** (Gemini vision) and
+**writes the trades** into the user's investments Google Sheet. Amounts in
+the screenshots can be in **€ or $** (confirmed).
+
+**Target spreadsheet.** ID goes in env `TRADES_SPREADSHEET_ID` (the user
+has the link). **Never commit the ID or link**: this repo is public and the
+sheet holds personal financial data. Structure observed 2026-11-16 (European
+locale: `1.234,56`, dates `dd/mm/yyyy`, € everywhere):
+
+| Tab | Shape | Columns (header row 3) |
+|---|---|---|
+| `Summary` | formulas only — **never write** | Asset, Gross profit, Fees, Tax (19% on gross − fees when positive), Net profit; sub-totals by tab |
+| `Crypto` | **append-only ledger**, BTC+ETH, FIFO | Date, Asset, Type, Units, Value € (app), Fee type, Fee input (€ or %), Fee (€), Price €/unit, then many **computed** columns (Cum bought…, FIFO cost…, Realized gross profit, Position), Notes |
+| `MSCI World` | **one row per ETF position** (CW8, EUNL) | Asset, Position (units), Avg buy price (€), Invested (€), Current price (€), Gross profit (€), Fee type, Fee input, Fee (€), Notes; `TOTAL MSCI` row |
+| `Trading` | one row per closed stock trade | Asset, Buy price (€), Position (units), Sell price (€), Gross profit (€), Fee type, Fee input, Fee (€), Notes (original $ prices noted there) |
+
+**Proposed design** (hexagonal, same rules as §2):
+
+- Trigger: a photo / image file sent to the main bot by an **allow-listed
+  Telegram user** (`TRADES_ALLOWED_USER_IDS`) — in a DM or a dedicated topic
+  (to decide). Anyone else is ignored: this writes to the user's finances.
+- `domain/value_objects/trade.py` — `Trade(date, asset, side Buy|Sell,
+  units, price, amount, currency €|$, fee_type €|%, fee_input, fx_rate,
+  notes)` with validation (units > 0, etc.). The extractor returns the
+  amounts **in the currency shown** plus the currency; € conversion is a
+  separate step (below), never guessed by the model.
+- **Currency (€ or $):** the sheet is all in €. For a $ trade: if the BBVA
+  screenshot itself shows the € amount charged/credited or the exchange rate
+  applied, use that (it's the real one); otherwise convert with the **ECB
+  reference rate of the trade date** via a new `ExchangeRateProvider` port
+  (free, no key — e.g. ECB data API or Frankfurter). Either way keep the
+  original $ prices + rate in Notes (the `Trading` tab already does this:
+  "Buy $309.06 · Sell $380.25"). € trades are written as-is.
+- `application/ports/trade_extractor.py` — `TradeExtractor.extract(image)
+  -> list[Trade]`; adapter `infrastructure/ai/gemini_trade_extractor.py`
+  using Gemini vision (`inline_data`, as in §8.8) with **structured JSON
+  output** (`responseMimeType: application/json` + `responseSchema`) instead
+  of free text. One screenshot may contain several trades.
+- `application/ports/trade_ledger.py` — `TradeLedger.record(trades)`;
+  adapter `infrastructure/sheets/google_sheets_trade_ledger.py` over
+  **Google Sheets API v4** with a **service account** (JSON key in env
+  `GOOGLE_SERVICE_ACCOUNT_JSON`; the sheet shared with the service-account
+  email as Editor — public "anyone with the link" access is read-only and
+  not enough to write). New dependency (`google-auth`, or a hand-signed JWT
+  with stdlib + `httpx`); remember `requirements.txt` is UTF-16 LE (§3).
+- Routing by asset (application service, e.g. `TradeRouting`): BTC/ETH →
+  `Crypto` (`values.append`, writing **only the input columns** A–H + Notes;
+  the computed columns must be filled by copying the previous row's formulas
+  or by an ARRAYFORMULA in the sheet — to decide with the user); CW8/EUNL →
+  `MSCI World` (**update** the position row: new units, recomputed average
+  buy price, invested amount); other stocks → `Trading`.
+- **Confirmation before writing** (strongly recommended): the bot replies
+  with the parsed trades (Russian) + inline buttons "✅ Записать" /
+  "❌ Отмена"; only on ✅ does it write. Screenshot OCR can misread digits.
+- Idempotency: skip trades already present (same date + asset + side +
+  units), so re-sending a screenshot doesn't duplicate rows.
+
+**Open questions for the user before building:**
+1. ~~Which app?~~ → **BBVA broker** (answered). Still needed: a few real
+   sample screenshots (buy, sell, €, $, crypto if BBVA is used for it) to
+   tune and test the extraction.
+2. Where to send them: DM to the bot or a specific topic?
+3. ~~Currency?~~ → **€ or $** (answered). To confirm with a sample: does the
+   BBVA screenshot of a $ trade show the € amount / exchange rate applied?
+   (If yes, use it; if not, ECB rate of the trade date — see design.)
+4. `Trading` has no Date column — add one?
+5. `Crypto` computed columns: copy formulas row by row, or switch the sheet
+   to ARRAYFORMULA so the bot only appends inputs?
+6. `MSCI World`: keep one aggregated row per ETF (bot recomputes the
+   average) or move to a ledger like `Crypto`?
+
 - **Moderator bot** — deferred; prerequisites now met (Postgres live, `users`
   table, roles). Rough sketch discussed: `ModerationPolicy` (domain service),
   `MemberStrikes` entity + `ModerationStateRepository` (Postgres, same pattern as
