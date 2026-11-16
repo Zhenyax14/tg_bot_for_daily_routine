@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from typing import Sequence
 
 import httpx
@@ -24,6 +25,10 @@ _URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generate
 # se reintentan con espera creciente antes de rendirse.
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _RETRY_DELAYS_SECONDS = (2.0, 5.0)
+# La busqueda con Google tiene su propia cuota (en el plan gratuito, muy baja o
+# nula). Agotada (429), se deja de pedir durante este tiempo y se contesta sin
+# ella al momento, en vez de reintentar en cada mensaje.
+_SEARCH_COOLDOWN_SECONDS = 3600.0
 
 
 class GeminiLanguageModel:
@@ -32,10 +37,13 @@ class GeminiLanguageModel:
         api_key: str,
         timeout: float = 60.0,
         retry_delays: tuple[float, ...] = _RETRY_DELAYS_SECONDS,
+        monotonic=time.monotonic,
     ) -> None:
         self._api_key = api_key
         self._timeout = timeout
         self._retry_delays = retry_delays
+        self._monotonic = monotonic
+        self._search_blocked_until = 0.0
 
     async def generate(
         self,
@@ -47,13 +55,25 @@ class GeminiLanguageModel:
         body: dict = {"contents": [_content(turn) for turn in conversation]}
         if system_instruction.strip():
             body["system_instruction"] = {"parts": [{"text": system_instruction}]}
-        if web_search:
+        use_search = web_search and self._monotonic() >= self._search_blocked_until
+        if use_search:
             # Grounding con Google Search: el modelo decide si buscar y cuanto.
             body["tools"] = [{"google_search": {}}]
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await self._post(client, model, body)
+                if use_search:
+                    response = await self._post(client, model, body, retry_delays=())
+                    if response.status_code == 429:
+                        self._search_blocked_until = self._monotonic() + _SEARCH_COOLDOWN_SECONDS
+                        logger.warning(
+                            "Gemini: cuota de busqueda web agotada (%s); sin busqueda durante %.0f min",
+                            _error_message(response)[:120], _SEARCH_COOLDOWN_SECONDS / 60,
+                        )
+                        del body["tools"]
+                        response = await self._post(client, model, body)
+                else:
+                    response = await self._post(client, model, body)
         except httpx.HTTPError as exc:
             raise LanguageModelError(f"Gemini: fallo de red: {exc}") from exc
 
@@ -62,8 +82,11 @@ class GeminiLanguageModel:
 
         return _extract_text(response.json())
 
-    async def _post(self, client: httpx.AsyncClient, model: str, body: dict) -> httpx.Response:
-        for delay in (*self._retry_delays, None):
+    async def _post(
+        self, client: httpx.AsyncClient, model: str, body: dict, retry_delays: tuple[float, ...] | None = None
+    ) -> httpx.Response:
+        delays = self._retry_delays if retry_delays is None else retry_delays
+        for delay in (*delays, None):
             response = await client.post(
                 _URL.format(model=model), headers={"x-goog-api-key": self._api_key}, json=body
             )

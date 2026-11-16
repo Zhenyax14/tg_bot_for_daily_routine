@@ -1,6 +1,7 @@
 """Caso de uso: el robo-advisor (el bot principal) analiza movimientos de
-mercado y publica el analisis en el hilo de alertas, con busqueda web para
-encontrar la causa. Su identidad es propia y estrategica (ver
+mercado y publica el analisis en el hilo de alertas. La causa sale de los
+titulares recientes (NewsProvider) y, si hay cuota, de la busqueda web del
+modelo. Su identidad es propia y estrategica (ver
 market_analysis_prompt): no usa las instrucciones del asistente de /admin/ai,
 que es para divertir; de alli solo toma el modelo (`model_name`).
 
@@ -22,6 +23,7 @@ from typing import Callable
 
 from application.ports.clock import Clock
 from application.ports.language_model import LanguageModel, LanguageModelError
+from application.ports.news_provider import NewsProvider
 from application.ports.notifier import Notifier
 from application.services.market_analysis_prompt import (
     ALERT,
@@ -41,16 +43,19 @@ class AnalyzeMarketMoves:
         model_name: Callable[[], str],
         publisher: Notifier,
         clock: Clock,
+        news: NewsProvider,
     ) -> None:
         self._model = model
         self._model_name = model_name
         self._publisher = publisher
         self._clock = clock
+        self._news = news
 
     async def execute(self, moves: MarketMoves, task: Task = ALERT) -> bool:
         model_name = self._model_name()
         instruction = build_analysis_instruction(task)
-        request = build_analysis_request(moves, self._clock.now(), task)
+        headlines = await self._news.latest([alert.instrument for alert in moves.alerts])
+        request = build_analysis_request(moves, self._clock.now(), task, headlines)
         try:
             analysis = await self._model.generate(model_name, instruction, request, web_search=True)
         except LanguageModelError as exc:

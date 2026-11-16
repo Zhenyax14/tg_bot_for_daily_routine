@@ -677,9 +677,29 @@ Three triggers:
   idiosyncratic (SPY/QQQ/DIA/IWM/URTH, sector, MOEX peers + ruble), likely
   driver from **today's news**, what to watch; ≤ ~1200–1500 chars, no
   buy/sell advice, never invent news.
-- Web search: `LanguageModel.generate(..., web_search=True)` → Gemini
-  `tools: [{"google_search": {}}]`; on failure, retried once without it.
+- **News (always):** `NewsProvider` port → `RssNewsProvider`
+  (`infrastructure/news/rss_news_provider.py`, free, no key). **Google News
+  RSS** (`q=<query> when:1d`) first; **Bing News RSS** (`format=rss`,
+  `qft=interval="7"` = 24 h, `setmkt=en-US|ru-RU`, source in
+  `<News:Source>`) as fallback. Google rate-limits by IP (**429** after a
+  burst — seen live 2026-11-16): after a 429 Google is skipped for 15 min.
+  Each query cached 15 min, 5 s timeout, max 3 concurrent requests,
+  headlines older than 36 h dropped. One query per instrument involved (EN
+  for US/crypto, RU for MOEX/FX) + a general-market query per market;
+  deduped, newest first, ≤ 25, appended to the prompt as "Recent news
+  headlines" (the model must cite the outlet). Alerts/reviews: news for the
+  moved instruments. Questions: news for catalog instruments **named in the
+  question** (label or ticker) + general market. A query failing on both
+  sources is logged and skipped. Added because Gemini's own search returned
+  **429 quota exceeded** on this key (free tier).
+- **Gemini web search (bonus, when quota allows):** `generate(...,
+  web_search=True)` → `tools: [{"google_search": {}}]`. On **429** the adapter
+  answers immediately without search and stops asking for it for **1 h**
+  (`_SEARCH_COOLDOWN_SECONDS`, no 2 s/5 s retries wasted); other failures:
+  the use case retries once without search.
 - Files: `domain/value_objects/market_moves.py`,
+  `domain/value_objects/news_headline.py`, `application/ports/news_provider.py`,
+  `infrastructure/news/rss_news_provider.py`,
   `application/services/market_analysis_prompt.py`,
   `application/services/market_snapshot.py`,
   `application/use_cases/analyze_market_moves.py`,

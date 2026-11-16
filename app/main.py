@@ -45,6 +45,7 @@ from infrastructure.holidays.country_routing import CountryRoutingHolidayProvide
 from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
 from infrastructure.location.festivos_io_municipality_directory import FestivosIoMunicipalityDirectory
+from infrastructure.news.rss_news_provider import RssNewsProvider
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
 from infrastructure.notifiers.telegram_markdown import TelegramMarkdownNotifier
@@ -204,12 +205,14 @@ def build_application(settings: Settings) -> Application:
     advisor_handler: AdvisorMessageHandler | None = None
     if settings.gemini_api_key and not settings.dry_run:
         advisor_model = GeminiLanguageModel(settings.gemini_api_key)
+        news = RssNewsProvider()  # titulares 24 h (Google News, respaldo Bing): sin depender de la cuota de busqueda
         advisor_model_name = lambda: ai_personas.current.model  # noqa: E731
         analyze_market_moves = AnalyzeMarketMoves(
             advisor_model,
             advisor_model_name,
             TelegramMarkdownNotifier(settings.bot_token, settings.chat_id, settings.price_alerts_thread_id),
             clock,
+            news,
         )
         market_snapshot = MarketSnapshot(instrument_settings, routing_quote_provider, day_opens)
         review_market = ReviewMarket(market_snapshot, analyze_market_moves, MARKET_REVIEW_THRESHOLD_PERCENT)
@@ -220,7 +223,7 @@ def build_application(settings: Settings) -> Application:
         )
         advisor_handler = AdvisorMessageHandler(
             settings.price_alerts_thread_id,
-            AnswerAdvisorQuestion(advisor_model, advisor_model_name, market_snapshot, clock),
+            AnswerAdvisorQuestion(advisor_model, advisor_model_name, market_snapshot, clock, news, INSTRUMENTS),
             ConversationMemory(),
         )
     else:

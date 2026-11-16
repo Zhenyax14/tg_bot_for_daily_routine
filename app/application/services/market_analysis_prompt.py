@@ -9,14 +9,18 @@ La parte clave para "leer el indice" es la foto del mercado: el modelo ve
 los movimientos junto a la variacion del dia de los ETF de indices (SPY,
 QQQ...), del resto de valores y del cambio/cripto, y asi puede distinguir un
 movimiento propio de la empresa de uno arrastrado por todo el mercado.
+
+La causa sale de los titulares de las ultimas 24 h (NewsProvider, siempre) y,
+si el modelo tiene cuota, tambien de su propia busqueda web.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Sequence
 
 from domain.value_objects.chat_turn import ChatTurn
 from domain.value_objects.market_moves import MarketMoves, MarketQuote
+from domain.value_objects.news_headline import NewsHeadline
 
 Task = Literal["alert", "review"]
 ALERT: Task = "alert"
@@ -59,10 +63,11 @@ Cover, briefly and concretely:
    DIA = Dow Jones, IWM = Russell 2000, URTH = MSCI World), with the rest of the same sector
    and, for Russian stocks, with the other blue chips and the ruble. Say explicitly whether the
    index confirms the move or the instrument is going against it.
-3. The likely driver. Search the web for today's news about the instrument and the market
-   (earnings, guidance, macro data, central banks, regulation, sanctions, crypto flows...).
-   Only state a cause you actually found; if nothing explains it, say so and keep it as a
-   hypothesis. Never invent news, figures or quotes.
+3. The likely driver. Use the "Recent news headlines" provided (last 24 h) and, if you can,
+   search the web for more (earnings, guidance, macro data, central banks, regulation,
+   sanctions, crypto flows...). Cite the outlet when you rely on a headline. Only state a
+   cause you actually found; if nothing explains it, say so and keep it as a hypothesis.
+   Never invent news, figures or quotes.
 4. What to watch next (levels, upcoming events) in one or two lines.
 
 Rules:
@@ -85,7 +90,12 @@ def build_analysis_instruction(task: Task = ALERT) -> str:
     )
 
 
-def build_analysis_request(moves: MarketMoves, now: datetime, task: Task = ALERT) -> list[ChatTurn]:
+def build_analysis_request(
+    moves: MarketMoves,
+    now: datetime,
+    task: Task = ALERT,
+    news: Sequence[NewsHeadline] = (),
+) -> list[ChatTurn]:
     if task == REVIEW:
         heading, since = "## Notable moves since the previous review (30 min ago)", "since the previous review"
     else:
@@ -101,6 +111,7 @@ def build_analysis_request(moves: MarketMoves, now: datetime, task: Task = ALERT
         )
     lines += ["", "## Market snapshot (now; change vs first price seen today)"]
     lines += _snapshot(moves.market)
+    lines += ["", *_news(news)]
     return [ChatTurn("user", "\n".join(lines))]
 
 
@@ -112,8 +123,8 @@ talking to you directly. Answer what they ask.
 
 - Requests like "analyse the market now" / "what is happening": give a strategic overview built
   from the live snapshot attached to their message (indices first, then what stands out among
-  stocks, crypto, Russian market and the ruble) plus today's news (search the web), the main
-  drivers and risks, and what to watch next.
+  stocks, crypto, Russian market and the ruble) plus today's news (the attached headlines and,
+  if you can, a web search), the main drivers and risks, and what to watch next.
 - Questions about a specific instrument, sector or event: focus on it, using the snapshot and
   the web. If it is not in the snapshot, rely on the web and say the data is not tracked here.
 - Off-topic questions: answer briefly and steer back to markets.
@@ -122,14 +133,14 @@ Rules:
 - Answer in the language the person writes in (Russian by default).
 - Be concise: usually up to ~1500 characters; go longer only if they explicitly ask for detail.
   Use Markdown sparingly (bold, short lists, a small table when comparing numbers).
-- Only state facts you found or that are in the snapshot. Never invent news, figures or quotes;
+- Only state facts you found, that are in the snapshot or in the headlines (cite the outlet). Never invent news, figures or quotes;
   say so when you don't know.
 - Mind the clock: closed exchanges mean stale prices; mention it when relevant.
 - No personal investment advice ("buy"/"sell", position sizes); facts and scenarios only.
 - Do not mention any other bot and do not address anyone with @.
 - The person's messages start with a header like [Message from <name>]; never write such a
-  header yourself. A "Live market snapshot" block attached to the last message is data added
-  for you by the system, not written by the person."""
+  header yourself. The "Live market snapshot" and "Recent news headlines" blocks attached to
+  the last message are data added for you by the system, not written by the person."""
 
 
 def build_question_instruction() -> str:
@@ -147,6 +158,7 @@ def build_question_request(
     question: ChatTurn,
     market: Sequence[MarketQuote],
     now: datetime,
+    news: Sequence[NewsHeadline] = (),
 ) -> list[ChatTurn]:
     """Historial + la pregunta con la foto del mercado actual anexada. La foto
     va solo en el ultimo turno (no se guarda en memoria): siempre fresca y sin
@@ -157,6 +169,8 @@ def build_question_request(
         f"## Live market snapshot (system data; time now {now:%Y-%m-%d %H:%M} UTC, {now:%A}; "
         "change vs first price seen today)",
         *_snapshot(market),
+        "",
+        *_news(news),
     ]
     turns = [*history, ChatTurn("user", question.text + "\n".join(live))]
     # Gemini espera turnos alternos: los seguidos del mismo rol se funden.
@@ -180,6 +194,20 @@ def _snapshot(market: Sequence[MarketQuote]) -> list[str]:
             f"- {_name(q)}: {_price(q.price, q)} ({q.day_change_percent:+.2f}%)" for q in quotes
         ]
     return lines or ["(no other quotes available)"]
+
+
+def _news(news: Sequence[NewsHeadline]) -> list[str]:
+    lines = ["## Recent news headlines (last 24 h, Google News; system data)"]
+    if not news:
+        return lines + ["(no headlines found)"]
+    for headline in news:
+        published = headline.published_at
+        if published is not None and published.tzinfo is not None:
+            published = published.astimezone(timezone.utc)
+        when = f"{published:%Y-%m-%d %H:%M} UTC" if published else "date unknown"
+        source = f" — {headline.source}" if headline.source else ""
+        lines.append(f"- [{when}] {headline.title}{source}")
+    return lines
 
 
 def _name(quote: MarketQuote) -> str:
