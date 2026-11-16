@@ -614,6 +614,10 @@ The main bot is untouched (it still ignores topic messages).
   its own messages as `model`, everyone else as `user` with a
   `[Message from <name>]` header (consecutive same-role turns merged).
   After a restart, the quoted message seeds a new topic.
+- **Mentions by name:** models sometimes write `@<display name>` (e.g.
+  `@Putan`) instead of `@<username>`; Telegram doesn't link it and the relay
+  misses it. `normalize_mentions()` rewrites it to `@username` before sending
+  (the prompt also asks for the exact @username).
 - Text only (photo captions included; images are not sent to the model).
 - Each bot is its own `Application`, started in the main bot's `post_init`
   (`initialize/start/updater.start_polling`) and stopped in `post_shutdown`; a

@@ -46,7 +46,8 @@ def build_squad_instruction(
     if roster:
         setting += (
             f"\nThe other bots here:\n{roster}\n"
-            "To address one of them and get its reply, include its @username in your message. "
+            "To address one of them and get its reply, include its exact @username (as listed "
+            "in parentheses above) in your message; never write @ followed by its name. "
             "Only mention a bot when you really want it to answer; otherwise mention no bot."
         )
     setting += (
@@ -75,6 +76,17 @@ def squad_conversation(messages: Sequence[SquadMessage], slot: int) -> list[Chat
         else:
             turns.append(ChatTurn(role, text))
     return turns
+
+
+def normalize_mentions(text: str, members: Mapping[int, SquadMember]) -> str:
+    """El modelo a veces menciona a otro bot por su nombre (@Putan) en vez de
+    por su @username: Telegram no lo enlaza y el relevo no lo detecta. Se
+    reescribe a @username (nombres mas largos primero, sin distinguir mayusculas)."""
+    for member in sorted(members.values(), key=lambda m: len(m.name), reverse=True):
+        if member.name.strip() and member.name.lower() != member.username.lower():
+            pattern = re.compile("@" + re.escape(member.name) + r"(?!\w)", re.IGNORECASE)
+            text = pattern.sub(lambda _: "@" + member.username, text)
+    return text
 
 
 def mentioned_slots(text: str, members: Mapping[int, SquadMember], exclude: int | None = None) -> list[int]:

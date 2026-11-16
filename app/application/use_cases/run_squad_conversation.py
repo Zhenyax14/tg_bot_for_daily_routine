@@ -23,7 +23,12 @@ from typing import Coroutine, Mapping
 from application.ports.language_model import LanguageModel, LanguageModelError
 from application.ports.squad_gateway import SquadDeliveryError, SquadGateway
 from application.services.squad_persona_service import SquadPersonaService
-from application.services.squad_prompt import build_squad_instruction, mentioned_slots, squad_conversation
+from application.services.squad_prompt import (
+    build_squad_instruction,
+    mentioned_slots,
+    normalize_mentions,
+    squad_conversation,
+)
 from application.services.squad_topics import SquadTopics
 from domain.value_objects.squad_message import SquadMessage
 
@@ -100,7 +105,7 @@ class RunSquadConversation:
         conversation = squad_conversation(self._topics.transcript(topic_id, trigger.message_id), slot)
         try:
             await self._gateway.typing(slot)
-            answer = await model.generate(persona.model, instruction, conversation)
+            answer = normalize_mentions(await model.generate(persona.model, instruction, conversation), members)
             sent = await self._gateway.send(slot, answer, trigger.message_id)
         except (LanguageModelError, SquadDeliveryError) as exc:
             self._topics.release(topic_id, slot)
