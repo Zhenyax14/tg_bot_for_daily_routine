@@ -12,6 +12,10 @@ class ReferencePrices:
         self._day: date | None = None
         self._references: dict[str, float] = {}
 
+    @property
+    def today(self) -> Callable[[], date]:
+        return self._today_provider
+
     def reference_for(self, symbol: str) -> float | None:
         self._reset_if_new_day()
         return self._references.get(symbol)

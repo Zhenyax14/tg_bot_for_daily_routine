@@ -37,10 +37,19 @@ class GeminiLanguageModel:
         self._timeout = timeout
         self._retry_delays = retry_delays
 
-    async def generate(self, model: str, system_instruction: str, conversation: Sequence[ChatTurn]) -> str:
+    async def generate(
+        self,
+        model: str,
+        system_instruction: str,
+        conversation: Sequence[ChatTurn],
+        web_search: bool = False,
+    ) -> str:
         body: dict = {"contents": [_content(turn) for turn in conversation]}
         if system_instruction.strip():
             body["system_instruction"] = {"parts": [{"text": system_instruction}]}
+        if web_search:
+            # Grounding con Google Search: el modelo decide si buscar y cuanto.
+            body["tools"] = [{"google_search": {}}]
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
