@@ -10,4 +10,14 @@ class LanguageModelError(Exception):
 
 
 class LanguageModel(Protocol):
-    async def generate(self, model: str, system_instruction: str, conversation: Sequence[ChatTurn]) -> str: ...
+    async def generate(
+        self,
+        model: str,
+        system_instruction: str,
+        conversation: Sequence[ChatTurn],
+        web_search: bool = False,
+    ) -> str:
+        """`web_search`: el modelo puede buscar en la web (noticias de hoy)
+        antes de contestar. No todos los modelos/cuotas lo admiten: si falla,
+        lanza LanguageModelError como cualquier otro error."""
+        ...

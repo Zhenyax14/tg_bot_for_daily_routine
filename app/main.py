@@ -12,11 +12,14 @@ from application.services.conversation_memory import ConversationMemory
 from application.services.instrument_settings_service import InstrumentSettingsService
 from application.services.knowledge_base import KnowledgeBase
 from application.services.location_service import LocationService
+from application.services.market_snapshot import MarketSnapshot
 from application.services.reference_prices import ReferencePrices
 from application.services.squad_persona_service import SquadPersonaService
 from application.services.squad_topics import SquadTopics
 from application.services.uptime_service import UptimeService
 from application.services.user_service import UserService
+from application.use_cases.analyze_market_moves import AnalyzeMarketMoves
+from application.use_cases.answer_advisor_question import AnswerAdvisorQuestion
 from application.use_cases.answer_mention import AnswerMention
 from application.use_cases.announce_todays_holidays import AnnounceTodaysHolidays
 from application.use_cases.bootstrap_admin_user import BootstrapAdminUser
@@ -24,6 +27,7 @@ from application.use_cases.check_price_movements import CheckPriceMovements
 from application.use_cases.get_todays_holidays import GetTodaysHolidays
 from application.use_cases.get_upcoming_holidays import GetUpcomingHolidays
 from application.use_cases.get_world_times import GetWorldTimes
+from application.use_cases.review_market import ReviewMarket
 from application.use_cases.run_squad_conversation import RunSquadConversation
 from application.use_cases.schedule_daily_messages import ScheduleDailyMessages
 from application.use_cases.send_message import SendMessage
@@ -41,8 +45,10 @@ from infrastructure.holidays.country_routing import CountryRoutingHolidayProvide
 from infrastructure.holidays.festivos_io import FestivosIoHolidayProvider
 from infrastructure.holidays.nager_date import NagerDateHolidayProvider
 from infrastructure.location.festivos_io_municipality_directory import FestivosIoMunicipalityDirectory
+from infrastructure.news.rss_news_provider import RssNewsProvider
 from infrastructure.notifiers.console import ConsoleNotifier
 from infrastructure.notifiers.telegram import TelegramNotifier
+from infrastructure.notifiers.telegram_markdown import TelegramMarkdownNotifier
 from infrastructure.persistence.database import Database
 from infrastructure.persistence.postgres_ai_persona_repository import PostgresAiPersonaRepository
 from infrastructure.persistence.postgres_instrument_settings_repository import (
@@ -61,6 +67,7 @@ from infrastructure.quotes.routing_quote_provider import RoutingQuoteProvider
 from infrastructure.quotes.yahoo_finance_quote_provider import YahooFinanceQuoteProvider
 from infrastructure.scheduling.apscheduler_adapter import APSchedulerAdapter
 from infrastructure.security.bcrypt_password_hasher import BcryptPasswordHasher
+from infrastructure.telegram.advisor_message_handler import AdvisorMessageHandler
 from infrastructure.telegram.ai_mention_handler import ALBUM_IMAGES, AiMentionHandler
 from infrastructure.telegram.commands.holidays_command import HolidaysCommand
 from infrastructure.telegram.commands.time_command import TimeCommand
@@ -71,6 +78,8 @@ from infrastructure.time.system_clock import SystemClock
 from infrastructure.web.admin_server import AdminServer, build_admin_app
 
 PRICE_ALERTS_CHECK_INTERVAL_MINUTES = 5
+MARKET_REVIEW_INTERVAL_MINUTES = 30
+MARKET_REVIEW_THRESHOLD_PERCENT = 2.0  # movimiento minimo entre revisiones para comentarlo
 
 logger = logging.getLogger("bot")
 
@@ -141,22 +150,13 @@ def build_application(settings: Settings) -> Application:
     routing_quote_provider = RoutingQuoteProvider(
         {"us": yahoo_finance_provider, "crypto": yahoo_finance_provider, "ru": moex_provider, "fx": moex_provider}
     )
-    reference_prices = ReferencePrices(lambda: datetime.now(ZoneInfo(settings.timezone)).date())
+    today = lambda: datetime.now(ZoneInfo(settings.timezone)).date()  # noqa: E731
+    reference_prices = ReferencePrices(today)
+    # Primer precio visto hoy por simbolo: variacion del dia para el robo-advisor.
+    day_opens = ReferencePrices(today)
     movement_policy = PriceMovementPolicy(5.0)
     instrument_settings = InstrumentSettingsService(
         PostgresInstrumentSettingsRepository(database), INSTRUMENTS
-    )
-
-    async def alert_price_movement(instrument, movement) -> None:
-        await send_price_alert.execute(format_movement_alert(instrument, movement))
-
-    check_price_movements = CheckPriceMovements(
-        instrument_settings, routing_quote_provider, reference_prices, movement_policy, alert_price_movement
-    )
-    scheduler.schedule_interval(
-        job_id="price-alerts",
-        minutes=PRICE_ALERTS_CHECK_INTERVAL_MINUTES,
-        job=check_price_movements.execute,
     )
 
     # Asistente IA (Gemini): responde a @menciones en el hilo General. La
@@ -195,6 +195,54 @@ def build_application(settings: Settings) -> Application:
             SquadMessageHandler(bot.slot, squad_conversation, squad_gateway),
         ))
         squad_apps[bot.slot] = squad_app
+    # Robo-advisor: el bot principal (@Legatus_Lanibot), con GEMINI_API_KEY y
+    # el modelo elegido en /admin/ai pero con identidad propia y estrategica
+    # (no las instrucciones de /admin/ai, que son para divertir). En el hilo
+    # de alertas: analiza cada evento de alertas (justo despues de publicarlas),
+    # cada 30 min revisa el mercado y comenta los movimientos notables (>= 2%
+    # desde la revision anterior), y contesta a quien le habla en ese hilo.
+    analyze_market_moves: AnalyzeMarketMoves | None = None
+    advisor_handler: AdvisorMessageHandler | None = None
+    if settings.gemini_api_key and not settings.dry_run:
+        advisor_model = GeminiLanguageModel(settings.gemini_api_key)
+        news = RssNewsProvider()  # titulares 24 h (Google News, respaldo Bing): sin depender de la cuota de busqueda
+        advisor_model_name = lambda: ai_personas.current.model  # noqa: E731
+        analyze_market_moves = AnalyzeMarketMoves(
+            advisor_model,
+            advisor_model_name,
+            TelegramMarkdownNotifier(settings.bot_token, settings.chat_id, settings.price_alerts_thread_id),
+            clock,
+            news,
+        )
+        market_snapshot = MarketSnapshot(instrument_settings, routing_quote_provider, day_opens)
+        review_market = ReviewMarket(market_snapshot, analyze_market_moves, MARKET_REVIEW_THRESHOLD_PERCENT)
+        scheduler.schedule_interval(
+            job_id="market-review",
+            minutes=MARKET_REVIEW_INTERVAL_MINUTES,
+            job=review_market.execute,
+        )
+        advisor_handler = AdvisorMessageHandler(
+            settings.price_alerts_thread_id,
+            AnswerAdvisorQuestion(advisor_model, advisor_model_name, market_snapshot, clock, news, INSTRUMENTS),
+            ConversationMemory(),
+        )
+    else:
+        logger.warning("GEMINI_API_KEY vacia o DRY_RUN: alertas sin robo-advisor")
+
+    async def alert_price_movement(instrument, movement) -> None:
+        await send_price_alert.execute(format_movement_alert(instrument, movement))
+
+    check_price_movements = CheckPriceMovements(
+        instrument_settings, routing_quote_provider, reference_prices, movement_policy, alert_price_movement,
+        day_opens=day_opens,
+        on_moves=analyze_market_moves.execute if analyze_market_moves is not None else None,
+    )
+    scheduler.schedule_interval(
+        job_id="price-alerts",
+        minutes=PRICE_ALERTS_CHECK_INTERVAL_MINUTES,
+        job=check_price_movements.execute,
+    )
+
     squad_model_catalog = model_catalog or (GeminiModelCatalog(squad_bots[0].gemini_api_key) if squad_bots else None)
     started_squad_apps: list[Application] = []
 
@@ -226,7 +274,6 @@ def build_application(settings: Settings) -> Application:
         )
         if settings.startup_message.strip():
             await send_message.execute(settings.startup_message)
-        await send_price_alert.execute("✅ Система ценовых алертов запущена.")
         uptime_service.mark_started()
         scheduler.start()
         await admin_server.start()
@@ -277,6 +324,18 @@ def build_application(settings: Settings) -> Application:
             ),
             AiMentionHandler(answer_mention, ConversationMemory()),
         ))
+    if advisor_handler is not None:
+        # Grupo de handlers aparte: el asistente del hilo General (grupo 0)
+        # tambien recibe las menciones del hilo de alertas (y las ignora). Sin
+        # bloquear: una respuesta con busqueda web tarda.
+        application.add_handler(
+            MessageHandler(
+                filters.Chat(chat_id=int(settings.chat_id)) & ~filters.COMMAND & (filters.TEXT | filters.CAPTION),
+                advisor_handler,
+                block=False,
+            ),
+            group=1,
+        )
     return application
 
 

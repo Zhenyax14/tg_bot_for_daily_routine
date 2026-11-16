@@ -430,10 +430,9 @@ constructor arg; `config/settings.py` gained `price_alerts_thread_id`; `main.py`
 wires all of the above (`build_price_alerts_notifier`, `RoutingQuoteProvider`,
 `ReferencePrices` keyed off `settings.timezone`, `CheckPriceMovements`,
 `scheduler.schedule_interval("price-alerts", 5, ...)` registered before
-`scheduler.start()`). `main.py`'s `_post_init` also sends a one-line Russian
-confirmation ("✅ Система ценовых алертов запущена.") to the alerts thread on
-every startup — cheap, permanent proof-of-life for this feature whenever the
-bot restarts.
+`scheduler.start()`). There is **no** startup message in the alerts thread
+(the old "✅ Система ценовых алертов запущена." was removed at the user's
+request, 2026-11-16).
 
 ### 8.7 DONE — per-instrument enable/disable from the admin panel
 
@@ -632,6 +631,82 @@ The main bot is untouched (it still ignores topic messages).
   `resources/views/admin/squad.html`.
 - `build_admin_app(...)` gained `squad_personas`, `squad_members`,
   `squad_model_catalog` (10th–12th, before `renderer`).
+
+### 8.10 Robo-advisor (main bot) in the price-alerts thread — built, pending live test
+
+The **main bot** (`TELEGRAM_BOT_TOKEN`, **@Legatus_Lanibot**) is also the
+**robo-advisor** of the price-alerts thread (`PRICE_ALERTS_THREAD_ID`,
+`https://t.me/c/1390219899/331017`). It uses `GEMINI_API_KEY` and the **model
+chosen in `/admin/ai`**, but **not** the `/admin/ai` instructions/context/
+documents nor the on/off switch (that persona is for fun; the advisor has
+its own fixed strategic identity, `_IDENTITY` in
+`application/services/market_analysis_prompt.py`). Enabled whenever
+`GEMINI_API_KEY` is set and not `DRY_RUN`. (It was first built on squad Bot 1
+@debate01_bot and moved to the main bot at the user's request, 2026-11-16;
+the squad bots are untouched.) The classic alert messages are unchanged; the
+analyses are separate messages (Markdown via `TelegramMarkdownNotifier`).
+Three triggers:
+
+1. **Alert event ("webhook"-style):** when a 5-minute cycle fires at least one
+   alert, `CheckPriceMovements` posts the alerts and then emits **one**
+   `MarketMoves` event (all alerts of the cycle + a snapshot of every enabled
+   instrument: price and change vs the **first price seen today**, tracked by
+   `day_opens`, a second never-chained `ReferencePrices`) →
+   `AnalyzeMarketMoves.execute(moves, ALERT)`. A market-wide drop yields one
+   analysis, not one per stock.
+2. **Periodic review every 30 min** (`ReviewMarket`, job `market-review`,
+   `MARKET_REVIEW_INTERVAL_MINUTES`): `MarketSnapshot` vs the previous review;
+   instruments that moved ≥ `MARKET_REVIEW_THRESHOLD_PERCENT` (2%) are
+   "notable moves" → `execute(moves, REVIEW)`. Nothing notable (or markets
+   closed) → **no post**. First review after startup only sets the baseline.
+   A ≥5% move can be commented by both triggers (accepted).
+3. **Conversation in the thread** (`AdvisorMessageHandler` →
+   `AnswerAdvisorQuestion`): a person who @mentions @Legatus_Lanibot **in
+   thread 331017** or replies to any of its messages there (answers,
+   analyses, even the classic alerts) gets a reply, e.g. "сделай анализ рынка
+   на сейчас". Each question gets a **fresh `MarketSnapshot`** appended to
+   the last user turn only (not stored in memory) + web search. Follow-ups use
+   `ConversationMemory`; otherwise the quoted bot message is the `model`
+   turn. A mention replying to someone else includes their message as quoted
+   text. Text only. Registered on the main `Application` in handler
+   **group 1** (`AiMentionHandler` in group 0 also matches but ignores topic
+   messages) with `block=False` (web-search answers are slow). Answers in the
+   language of the question (Russian by default).
+
+- Prompt tasks `ALERT` / `REVIEW` / question: what moved, market-wide vs
+  idiosyncratic (SPY/QQQ/DIA/IWM/URTH, sector, MOEX peers + ruble), likely
+  driver from **today's news**, what to watch; ≤ ~1200–1500 chars, no
+  buy/sell advice, never invent news.
+- **News (always):** `NewsProvider` port → `RssNewsProvider`
+  (`infrastructure/news/rss_news_provider.py`, free, no key). **Google News
+  RSS** (`q=<query> when:1d`) first; **Bing News RSS** (`format=rss`,
+  `qft=interval="7"` = 24 h, `setmkt=en-US|ru-RU`, source in
+  `<News:Source>`) as fallback. Google rate-limits by IP (**429** after a
+  burst — seen live 2026-11-16): after a 429 Google is skipped for 15 min.
+  Each query cached 15 min, 5 s timeout, max 3 concurrent requests,
+  headlines older than 36 h dropped. One query per instrument involved (EN
+  for US/crypto, RU for MOEX/FX) + a general-market query per market;
+  deduped, newest first, ≤ 25, appended to the prompt as "Recent news
+  headlines" (the model must cite the outlet). Alerts/reviews: news for the
+  moved instruments. Questions: news for catalog instruments **named in the
+  question** (label or ticker) + general market. A query failing on both
+  sources is logged and skipped. Added because Gemini's own search returned
+  **429 quota exceeded** on this key (free tier).
+- **Gemini web search (bonus, when quota allows):** `generate(...,
+  web_search=True)` → `tools: [{"google_search": {}}]`. On **429** the adapter
+  answers immediately without search and stops asking for it for **1 h**
+  (`_SEARCH_COOLDOWN_SECONDS`, no 2 s/5 s retries wasted); other failures:
+  the use case retries once without search.
+- Files: `domain/value_objects/market_moves.py`,
+  `domain/value_objects/news_headline.py`, `application/ports/news_provider.py`,
+  `infrastructure/news/rss_news_provider.py`,
+  `application/services/market_analysis_prompt.py`,
+  `application/services/market_snapshot.py`,
+  `application/use_cases/analyze_market_moves.py`,
+  `application/use_cases/review_market.py`,
+  `application/use_cases/answer_advisor_question.py`,
+  `infrastructure/telegram/advisor_message_handler.py`,
+  `infrastructure/notifiers/telegram_markdown.py`.
 
 ### 8.4 Instrument catalog (`infrastructure/config/instruments.py`)
 
